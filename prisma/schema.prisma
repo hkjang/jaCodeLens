@@ -4,7 +4,6 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
 }
 
 model Project {
@@ -21,6 +20,8 @@ model Project {
   stats       ProjectStats[]
   ruleSets    RuleSet[]
   risks       RiskAssessment[]
+  techDebts   TechDebt[]
+  decisions   DecisionRecord[]
 }
 
 model AnalysisExecute {
@@ -33,9 +34,15 @@ model AnalysisExecute {
   startedAt   DateTime @default(now())
   completedAt DateTime?
   
+  // Reliability & Operations
+  inputHash   String?  // SHA-256 integrity check
+  snapshotPath String? // Path to project snapshot
+  environment String?  // "DEV", "STAGE", "PROD"
+  
   results     AnalysisResult[]
   agentExecutions AgentExecution[]
   dependencies Dependency[]
+  approvalWorkflows ApprovalWorkflow[]
 }
 
 model AnalysisResult {
@@ -55,6 +62,10 @@ model AnalysisResult {
   // Expert Review
   reviewStatus    String          @default("OPEN") // "OPEN", "FIXED", "FALSE_POSITIVE", "WONT_FIX", "IN_PROGRESS"
   reviewComment   String?
+  humanCorrection String?         // Expert manual correction
+  isFlagged       Boolean         @default(false)
+  
+  comments        Comment[]
   
   // Relations to specific details
   vulnerability   Vulnerability?
@@ -155,4 +166,74 @@ model Dependency {
   from      String
   to        String
   type      String   // "IMPORT", "DYNAMIC"
+}
+
+// --- Enterprise & Reliability Features ---
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  action      String   // "ANALYSIS_START", "RESULT_MODIFIED", "APPROVED", "EXPORTED"
+  actorId     String?  // User ID or System Agent Name
+  targetType  String   // "PROJECT", "ANALYSIS", "RESULT"
+  targetId    String
+  details     String?  // JSON details
+  timestamp   DateTime @default(now())
+  ipAddress   String?
+}
+
+model TechDebt {
+  id            String   @id @default(uuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category      String   // "CODE", "ARCHITECTURE", "OPERATIONS", "SECURITY"
+  issueCount    Int
+  remediationCostHours Int?
+  remediationCostCurrency Float?
+  riskFactor    Float?   // 0-1 probability of failure if ignored
+  createdAt     DateTime @default(now())
+}
+
+model ApprovalWorkflow {
+  id          String   @id @default(uuid())
+  executeId   String
+  execute     AnalysisExecute @relation(fields: [executeId], references: [id], onDelete: Cascade)
+  stepName    String   // "Security Review", "Arch Review"
+  status      String   // "PENDING", "APPROVED", "REJECTED"
+  approverId  String?
+  comment     String?
+  updatedAt   DateTime @updatedAt
+}
+
+model Comment {
+  id          String   @id @default(uuid())
+  resultId    String
+  result      AnalysisResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  authorId    String
+  content     String
+  createdAt   DateTime @default(now())
+}
+
+model DecisionRecord {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String
+  description String
+  status      String   // "PROPOSED", "ACCEPTED", "REJECTED"
+  decidedBy   String
+  decidedAt   DateTime @default(now())
+}
+
+// --- MLOps & Stats Extensions ---
+
+model ModelExecution {
+  id          String   @id @default(uuid())
+  agentExecId String   
+  modelName   String
+  modelVersion String
+  latencyMs   Int
+  inputTokens Int
+  outputTokens Int
+  drift       Float?   // 0-1 drift score
+  createdAt   DateTime @default(now())
 }

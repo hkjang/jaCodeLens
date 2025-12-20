@@ -142,12 +142,18 @@ export class MultiAgentOrchestrator {
 
       await Promise.all(agentPromises)
 
+      // 2.5 Trigger Approvals
+      const { triggerApprovalsIfNeeded, isExecutionBlocked } = await import('../../workflow');
+      await triggerApprovalsIfNeeded(currentAnalysisId);
+      
+      const blocked = await isExecutionBlocked(currentAnalysisId);
+
       // 3. Finalize
       await prisma.analysisExecute.update({
         where: { id: currentAnalysisId },
         data: {
-          status: 'COMPLETED',
-          completedAt: new Date(),
+          status: blocked ? 'PENDING_APPROVAL' : 'COMPLETED',
+          completedAt: blocked ? null : new Date(),
           score: 0 // TODO: Calculate aggregated score
         }
       })
