@@ -93,8 +93,13 @@ export default async function ArchitectureReportPage({ params }: Props) {
             </h1>
             <p className="text-slate-400 mt-2">Deep dive into system structure, dependencies, and risk evolution.</p>
           </div>
-          <div className="px-4 py-2 bg-slate-800 rounded-lg border border-slate-700">
-            <span className="text-sm text-slate-400">Project ID:</span> <span className="font-mono text-blue-400">{params.id}</span>
+          <div className="flex gap-4 items-center">
+            <a href={`/report/${params.id}/expert`} className="px-4 py-2 bg-emerald-600/20 text-emerald-400 border border-emerald-600/50 rounded-lg hover:bg-emerald-600/30 transition-colors text-sm font-semibold">
+               Go to Expert Review &rarr;
+            </a>
+            <div className="px-4 py-2 bg-slate-800 rounded-lg border border-slate-700">
+               <span className="text-sm text-slate-400">Project ID:</span> <span className="font-mono text-blue-400">{params.id}</span>
+            </div>
           </div>
         </div>
 

@@ -51,6 +51,10 @@ model AnalysisResult {
   confidenceScore Float           @default(1.0)
   reasoning       String?         // Explainable AI reasoning
   createdAt       DateTime        @default(now())
+
+  // Expert Review
+  reviewStatus    String          @default("OPEN") // "OPEN", "FIXED", "FALSE_POSITIVE", "WONT_FIX", "IN_PROGRESS"
+  reviewComment   String?
   
   // Relations to specific details
   vulnerability   Vulnerability?

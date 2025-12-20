@@ -76,3 +76,20 @@ export async function getProject(id: string) {
   })
   return project
 }
+
+export async function updateIssueStatus(resultId: string, status: string, comment?: string) {
+  try {
+    await prisma.analysisResult.update({
+      where: { id: resultId },
+      data: { 
+        reviewStatus: status,
+        reviewComment: comment 
+      }
+    })
+    revalidatePath('/report')
+    return { success: true }
+  } catch (error) {
+    console.error('Failed to update issue status:', error)
+    return { success: false, error: 'Failed to update issue' }
+  }
+}
