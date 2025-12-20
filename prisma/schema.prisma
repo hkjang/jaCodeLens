@@ -5,6 +5,7 @@ datasource db {
 generator client {
   provider = "prisma-client-js"
   previewFeatures = ["driverAdapters"]
+  engineType = "wasm"
 }
 
 model Project {
@@ -73,17 +74,38 @@ model AnalysisResult {
   architecturalIssue ArchitecturalIssue?
 }
 
+
 model AgentExecution {
   id          String   @id @default(uuid())
   executeId   String
   execute     AnalysisExecute @relation(fields: [executeId], references: [id], onDelete: Cascade)
-  agentName   String
+  agentName   String   // e.g., "StructureAnalysisAgent"
   status      String   // "PENDING", "RUNNING", "COMPLETED", "FAILED"
   durationMs  Int?
   tokensUsed  Int?
   createdAt   DateTime @default(now())
   completedAt DateTime?
+
+  tasks       AgentTask[]
 }
+
+model AgentTask {
+  id              String         @id @default(uuid())
+  agentExecutionId String
+  agentExecution  AgentExecution @relation(fields: [agentExecutionId], references: [id], onDelete: Cascade)
+  
+  status          String         // "QUEUED", "RUNNING", "COMPLETED", "FAILED", "TIMED_OUT"
+  target          String         // "file:lib/utils.ts" or "module:auth"
+  retryCount      Int            @default(0)
+  errorMessage    String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  resultSummary   String?        // JSON summary of results
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
 
 model ProjectStats {
   id              String   @id @default(uuid())

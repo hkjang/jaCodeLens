@@ -3,14 +3,17 @@ import { PrismaLibSql } from '@prisma/adapter-libsql'
 import { createClient } from '@libsql/client'
 
 const prismaClientSingleton = () => {
-  const url = process.env.DATABASE_URL || 'file:./dev.db';
-  process.env.DATABASE_URL = url; // Force env var for internal checks
+  // In-memory DB for testing
+  const url = "file::memory:";
+  
+  process.env.DATABASE_URL = url;
   console.log('[DB] Initializing with URL:', url);
   
   const libsql = createClient({
     url,
   })
   const adapter = new PrismaLibSql(libsql)
+  console.log('[DB] Adapter created:', !!adapter);
 
   return new PrismaClient({
     adapter,
@@ -24,7 +27,11 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClientSingleton | undefined
 }
 
-const prisma = globalForPrisma.prisma ?? prismaClientSingleton()
+export let prisma = globalForPrisma.prisma ?? prismaClientSingleton()
+
+export function setPrisma(mock: any) {
+  prisma = mock;
+}
 
 export default prisma
 
