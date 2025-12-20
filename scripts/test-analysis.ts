@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import { runFullAnalysis } from '../lib/analyzer/index'
 import path from 'path'
 

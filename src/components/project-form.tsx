@@ -10,7 +10,9 @@ export function ProjectForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
-    await createProject(path, '')
+    const formData = new FormData()
+    formData.append('path', path)
+    await createProject(formData)
     setLoading(false)
     setPath('')
   }

@@ -1,10 +1,10 @@
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
 }
 
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 model Project {
@@ -35,6 +35,7 @@ model AnalysisExecute {
   
   results     AnalysisResult[]
   agentExecutions AgentExecution[]
+  dependencies Dependency[]
 }
 
 model AnalysisResult {
@@ -141,4 +142,13 @@ model RiskAssessment {
   mttrEstimate Int?    // Hours
   failureProb  Float?  // 0-1
   createdAt   DateTime @default(now())
+}
+
+model Dependency {
+  id        String   @id @default(uuid())
+  executeId String
+  execute   AnalysisExecute @relation(fields: [executeId], references: [id], onDelete: Cascade)
+  from      String
+  to        String
+  type      String   // "IMPORT", "DYNAMIC"
 }

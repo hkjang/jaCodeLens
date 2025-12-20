@@ -13,7 +13,7 @@ export default async function Home() {
         <ProjectForm />
 
         <div className="grid gap-4">
-          {projects.map((project) => (
+          {projects.map((project: any) => (
             <div key={project.id} className="p-4 rounded-lg border border-slate-800 bg-slate-900 hover:border-slate-700 transition">
               <div className="flex justify-between items-start">
                 <div>
