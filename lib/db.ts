@@ -1,10 +1,12 @@
 import { PrismaClient } from '@prisma/client'
 import { PrismaLibSql } from '@prisma/adapter-libsql'
 import { createClient } from '@libsql/client'
+import path from 'path'
 
 const prismaClientSingleton = () => {
-  // In-memory DB for testing
-  const url = "file::memory:";
+  // File-based SQLite for persistent data
+  const dbPath = path.resolve(process.cwd(), 'prisma', 'dev.db');
+  const url = `file:${dbPath}`;
   
   process.env.DATABASE_URL = url;
   console.log('[DB] Initializing with URL:', url);
@@ -13,7 +15,7 @@ const prismaClientSingleton = () => {
     url,
   })
   // Cast to fix type mismatch between @libsql/client version and adapter expectations
-  const adapter = new PrismaLibSql({ url } as any)
+  const adapter = new PrismaLibSql(libsql as any)
   console.log('[DB] Adapter created:', !!adapter);
 
   return new PrismaClient({
@@ -37,3 +39,4 @@ export function setPrisma(mock: any) {
 export default prisma
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+

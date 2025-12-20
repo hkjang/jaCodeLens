@@ -1,9 +1,8 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
-
 interface SkipLinkProps {
   href?: string;
+  text?: string;
   className?: string;
 }
 
@@ -13,10 +12,9 @@ interface SkipLinkProps {
  */
 export default function SkipLink({ 
   href = '#main-content',
+  text = '본문으로 건너뛰기',
   className = ''
 }: SkipLinkProps) {
-  const t = useTranslations('accessibility');
-
   return (
     <a
       href={href}
@@ -30,7 +28,8 @@ export default function SkipLink({
         ${className}
       `}
     >
-      {t('skipToContent')}
+      {text}
     </a>
   );
 }
+

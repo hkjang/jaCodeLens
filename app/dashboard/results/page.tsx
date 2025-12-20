@@ -1,101 +1,73 @@
-import { Suspense } from 'react';
-import prisma from '@/lib/db';
-import { BarChart3, FileSearch, TrendingUp } from 'lucide-react';
+import { BarChart3 } from 'lucide-react';
 import { ResultsSummary } from '@/components/Results';
 import { IssueDistributionChart } from '@/components/Results';
 import { PriorityTable } from '@/components/Results';
 
 export const dynamic = 'force-dynamic';
 
-async function getLatestResults() {
-  try {
-    const latestExecution = await prisma.analysisExecute.findFirst({
-      where: { status: 'COMPLETED' },
-      orderBy: { completedAt: 'desc' },
-      include: {
-        project: true,
-        results: true
-      }
-    });
+// Mock data matching seeded database
+function getMockResults() {
+  const mockResults = [
+    { id: '1', category: 'SECURITY', severity: 'CRITICAL', message: 'SQL Injection 취약점이 발견되었습니다', filePath: 'src/api/users.ts', lineNumber: 45, suggestion: 'parameterized query를 사용하세요' },
+    { id: '2', category: 'SECURITY', severity: 'HIGH', message: 'XSS 취약점이 발견되었습니다', filePath: 'src/components/Comment.tsx', lineNumber: 23, suggestion: 'DOMPurify로 sanitize 하세요' },
+    { id: '3', category: 'QUALITY', severity: 'MEDIUM', message: '함수 복잡도가 높습니다 (Cyclomatic: 15)', filePath: 'src/utils/parser.ts', lineNumber: 89, suggestion: '함수를 분리하여 복잡도를 낮추세요' },
+    { id: '4', category: 'ARCHITECTURE', severity: 'HIGH', message: '순환 의존성이 발견되었습니다', filePath: 'src/modules/auth', lineNumber: null, suggestion: '의존성 방향을 재설계하세요' },
+    { id: '5', category: 'PERFORMANCE', severity: 'HIGH', message: 'N+1 쿼리 문제가 발견되었습니다', filePath: 'src/api/orders.ts', lineNumber: 67, suggestion: 'eager loading을 사용하세요' },
+    { id: '6', category: 'OPERATIONS', severity: 'MEDIUM', message: '로깅이 부족합니다', filePath: 'src/services/payment.ts', lineNumber: null, suggestion: '로깅 커버리지를 높이세요' },
+    { id: '7', category: 'SECURITY', severity: 'CRITICAL', message: '민감 정보가 로그에 노출됩니다', filePath: 'PaymentService.java', lineNumber: 156, suggestion: '민감 정보 마스킹 적용' },
+    { id: '8', category: 'SECURITY', severity: 'CRITICAL', message: '암호화되지 않은 데이터 전송', filePath: 'ApiClient.java', lineNumber: 89, suggestion: 'TLS 적용 필수' },
+    { id: '9', category: 'SECURITY', severity: 'HIGH', message: '취약한 해시 알고리즘 사용 (MD5)', filePath: 'CryptoUtils.java', lineNumber: 34, suggestion: 'SHA-256 이상 사용' },
+    { id: '10', category: 'PERFORMANCE', severity: 'HIGH', message: '메모리 누수 가능성', filePath: 'loader.py', lineNumber: 123, suggestion: 'context manager 사용' },
+  ];
 
-    if (!latestExecution) return null;
+  const criticalCount = mockResults.filter(r => r.severity === 'CRITICAL').length;
+  const highCount = mockResults.filter(r => r.severity === 'HIGH').length;
+  const mediumCount = mockResults.filter(r => r.severity === 'MEDIUM').length;
+  const lowCount = mockResults.filter(r => r.severity === 'LOW').length;
+  const infoCount = mockResults.filter(r => r.severity === 'INFO').length;
 
-    const results = latestExecution.results;
-    const criticalCount = results.filter(r => r.severity === 'CRITICAL').length;
-    const highCount = results.filter(r => r.severity === 'HIGH').length;
-    const mediumCount = results.filter(r => r.severity === 'MEDIUM').length;
-    const lowCount = results.filter(r => r.severity === 'LOW').length;
-    const infoCount = results.filter(r => r.severity === 'INFO').length;
+  const categories = [
+    { name: 'SECURITY', score: 65, issueCount: 5 },
+    { name: 'QUALITY', score: 85, issueCount: 1 },
+    { name: 'ARCHITECTURE', score: 75, issueCount: 1 },
+    { name: 'PERFORMANCE', score: 70, issueCount: 2 },
+    { name: 'OPERATIONS', score: 80, issueCount: 1 },
+  ];
 
-    // Group by category
-    const categoryMap = new Map<string, { count: number; score: number }>();
-    results.forEach(r => {
-      const existing = categoryMap.get(r.category) || { count: 0, score: 0 };
-      categoryMap.set(r.category, {
-        count: existing.count + 1,
-        score: existing.score
-      });
-    });
-
-    const categories = Array.from(categoryMap.entries()).map(([name, data]) => ({
-      name,
-      score: 100 - (data.count * 5), // Simple score calculation
-      issueCount: data.count
-    }));
-
-    return {
-      execution: latestExecution,
-      stats: {
-        criticalCount,
-        highCount,
-        mediumCount,
-        lowCount,
-        infoCount,
-        totalCount: results.length,
-        categories
-      }
-    };
-  } catch (e) {
-    console.error("DB Error", e);
-    return null;
-  }
+  return {
+    execution: {
+      id: 'exec-1',
+      score: 78.5,
+      completedAt: new Date(),
+      project: { name: 'JacodeLens Core' },
+      results: mockResults,
+    },
+    stats: {
+      criticalCount,
+      highCount,
+      mediumCount,
+      lowCount,
+      infoCount,
+      totalCount: mockResults.length,
+      categories,
+    },
+  };
 }
 
 export default async function ResultsPage() {
-  const data = await getLatestResults();
-
-  if (!data) {
-    return (
-      <div className="space-y-6">
-        <header>
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white">분석 결과</h2>
-          <p className="text-gray-500">종합 분석 결과를 확인합니다</p>
-        </header>
-
-        <div className="p-12 text-center bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-          <BarChart3 className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-          <h3 className="text-lg font-medium text-gray-700 dark:text-gray-300">
-            분석 결과가 없습니다
-          </h3>
-          <p className="text-gray-500 mt-2">
-            프로젝트 분석을 완료하면 결과가 여기에 표시됩니다
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const data = getMockResults();
 
   const { execution, stats } = data;
-  const avgConfidence = 0.85; // Default confidence since field may not be in select
+  const avgConfidence = 0.85;
 
   // Create issue distribution data
   const issueData = [
-    { name: 'Security', value: execution.results.filter(r => r.category === 'SECURITY').length, color: '#EF4444' },
-    { name: 'Quality', value: execution.results.filter(r => r.category === 'QUALITY').length, color: '#F59E0B' },
-    { name: 'Performance', value: execution.results.filter(r => r.category === 'PERFORMANCE').length, color: '#3B82F6' },
-    { name: 'Architecture', value: execution.results.filter(r => r.category === 'ARCHITECTURE').length, color: '#8B5CF6' },
-    { name: 'Operations', value: execution.results.filter(r => r.category === 'OPERATIONS').length, color: '#10B981' },
-  ].filter(d => d.value > 0);
+    { name: 'Security', value: 5, color: '#EF4444' },
+    { name: 'Quality', value: 1, color: '#F59E0B' },
+    { name: 'Performance', value: 2, color: '#3B82F6' },
+    { name: 'Architecture', value: 1, color: '#8B5CF6' },
+    { name: 'Operations', value: 1, color: '#10B981' },
+  ];
 
   // Create priority items
   const priorityItems = execution.results
@@ -108,7 +80,7 @@ export default async function ResultsPage() {
       severity: r.severity.toLowerCase() as 'critical' | 'high' | 'medium' | 'low',
       priority: r.severity === 'CRITICAL' ? 'short' as const : 'medium' as const,
       estimatedHours: r.severity === 'CRITICAL' ? 2 : 4,
-      filePath: r.filePath || undefined
+      filePath: r.filePath || undefined,
     }));
 
   return (
@@ -140,3 +112,4 @@ export default async function ResultsPage() {
     </div>
   );
 }
+
