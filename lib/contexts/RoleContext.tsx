@@ -31,8 +31,8 @@ const roleConfigs: Record<UserRole, RoleConfig> = {
   operator: {
     id: 'operator',
     name: '운영자',
-    menus: ['dashboard', 'execution', 'operations', 'agents', 'queue', 'resources', 'logs', 'notifications'],
-    permissions: ['view_analysis', 'view_operations', 'manage_agents', 'view_logs'],
+    menus: ['dashboard', 'execution', 'operations', 'agents', 'queue', 'resources', 'logs', 'notifications', 'self-analysis', 'self-baseline', 'self-backlog'],
+    permissions: ['view_analysis', 'view_operations', 'manage_agents', 'view_logs', 'view_self_analysis'],
     homeWidgets: ['agent-status', 'queue', 'resources', 'alerts'],
   },
   architect: {
@@ -45,7 +45,7 @@ const roleConfigs: Record<UserRole, RoleConfig> = {
   admin: {
     id: 'admin',
     name: '관리자',
-    menus: ['dashboard', 'execution', 'results', 'operations', 'admin-roles', 'admin-policies', 'admin-agents', 'admin-models', 'admin-audit'],
+    menus: ['dashboard', 'execution', 'results', 'operations', 'admin-roles', 'admin-policies', 'admin-agents', 'admin-models', 'admin-audit', 'self-analysis', 'self-baseline', 'self-backlog', 'self-policy'],
     permissions: ['all'],
     homeWidgets: ['score', 'system-health', 'user-activity', 'alerts'],
   },

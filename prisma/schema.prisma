@@ -24,6 +24,136 @@ model Project {
   risks       RiskAssessment[]
   techDebts   TechDebt[]
   decisions   DecisionRecord[]
+  selfProject SelfProject?
+}
+
+// --- Self-Analysis (서비스 자기 분석) ---
+
+// 기본 프로젝트 (Self-Analysis용)
+model SelfProject {
+  id              String   @id @default(uuid())
+  projectId       String   @unique
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  type            String   @default("internal-core") // internal-core 고정
+  undeletable     Boolean  @default(true)
+  tags            String   @default("[\"self\",\"reference\",\"baseline\"]") // JSON array
+  
+  visibility      String   @default("admin-only") // "admin-only", "operator", "all"
+  
+  // 자동 등록 정보
+  registeredAt    DateTime @default(now())
+  registeredBy    String   @default("SYSTEM")
+  
+  // 분석 트리거 설정
+  triggerOnPush   Boolean  @default(true)
+  triggerOnMerge  Boolean  @default(true)
+  triggerOnBuild  Boolean  @default(true)
+  triggerOnDeploy Boolean  @default(true)
+  scheduleDaily   Boolean  @default(true)
+  
+  baselines       Baseline[]
+  policies        SelfAnalysisPolicy[]
+  triggers        AnalysisTrigger[]
+  backlogItems    BacklogItem[]
+}
+
+// 기준선 (Baseline)
+model Baseline {
+  id              String   @id @default(uuid())
+  selfProjectId   String
+  selfProject     SelfProject @relation(fields: [selfProjectId], references: [id], onDelete: Cascade)
+  
+  version         Int      @default(1)
+  status          String   @default("ACTIVE") // "ACTIVE", "LOCKED", "SUPERSEDED"
+  
+  // 지표
+  complexityScore Float?
+  debtScore       Float?
+  riskScore       Float?
+  qualityScore    Float?
+  securityScore   Float?
+  coverageScore   Float?
+  
+  // 상세 데이터 (JSON)
+  metrics         String?
+  
+  // 관리
+  isLocked        Boolean  @default(false)
+  lockedAt        DateTime?
+  lockedBy        String?
+  
+  approvedBy      String?
+  approvedAt      DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// 분석 트리거 이벤트
+model AnalysisTrigger {
+  id              String   @id @default(uuid())
+  selfProjectId   String
+  selfProject     SelfProject @relation(fields: [selfProjectId], references: [id], onDelete: Cascade)
+  
+  type            String   // "GIT_PUSH", "GIT_MERGE", "CI_BUILD", "DEPLOY", "SCHEDULE", "MANUAL"
+  source          String?  // Git commit SHA, Build ID, etc.
+  
+  status          String   @default("PENDING") // "PENDING", "RUNNING", "COMPLETED", "FAILED"
+  executionId     String?  // AnalysisExecute ID
+  
+  triggeredAt     DateTime @default(now())
+  triggeredBy     String?
+  completedAt     DateTime?
+  
+  errorMessage    String?
+}
+
+// Self-Analysis 전용 분석 정책
+model SelfAnalysisPolicy {
+  id              String   @id @default(uuid())
+  selfProjectId   String
+  selfProject     SelfProject @relation(fields: [selfProjectId], references: [id], onDelete: Cascade)
+  
+  name            String
+  isActive        Boolean  @default(true)
+  
+  // 정책 설정
+  failureTolerance        Int      @default(0)   // 실패 허용 Zero
+  warningThreshold        Float    @default(0.8) // 외부보다 엄격
+  confidenceWeight        Float    @default(1.0) // 최고 신뢰도
+  
+  requireExplanation      Boolean  @default(true)  // 설명 필수
+  requireHumanApproval    Boolean  @default(true)  // 휴먼 승인 필수
+  blockOnThresholdExceeded Boolean @default(true) // 임계 초과 시 배포 차단
+  
+  // 에이전트별 설정 (JSON)
+  agentSettings           String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// 자동 생성 백로그 아이템
+model BacklogItem {
+  id              String   @id @default(uuid())
+  selfProjectId   String
+  selfProject     SelfProject @relation(fields: [selfProjectId], references: [id], onDelete: Cascade)
+  
+  title           String
+  description     String
+  category        String   // "BUG", "IMPROVEMENT", "SECURITY", "TECH_DEBT"
+  priority        String   @default("MEDIUM") // "LOW", "MEDIUM", "HIGH", "CRITICAL"
+  
+  status          String   @default("OPEN") // "OPEN", "IN_PROGRESS", "RESOLVED", "WONT_FIX"
+  sourceResultId  String?  // 분석 결과 ID
+  
+  estimatedHours  Int?
+  assignedTo      String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  resolvedAt      DateTime?
 }
 
 model AnalysisExecute {

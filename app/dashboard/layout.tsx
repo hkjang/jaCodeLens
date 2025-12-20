@@ -20,7 +20,10 @@ import {
   Code2,
   Bell,
   User,
-  ChevronDown
+  ChevronDown,
+  Star,
+  Target,
+  ListTodo
 } from 'lucide-react';
 import { useRole, UserRole, roleConfigs } from '@/lib/contexts/RoleContext';
 
@@ -48,10 +51,15 @@ const allMenuItems = {
   'admin-models': { href: '/admin/models', icon: <Activity className="w-4 h-4" />, label: 'AI 모델' },
   'admin-audit': { href: '/dashboard/audit', icon: <ClipboardList className="w-4 h-4" />, label: '감사 로그' },
   settings: { href: '/dashboard/settings', icon: <Settings className="w-4 h-4" />, label: '설정' },
+  'self-analysis': { href: '/dashboard/self-analysis', icon: <Star className="w-4 h-4" />, label: 'Self Analysis' },
+  'self-baseline': { href: '/dashboard/self-analysis/baseline', icon: <Target className="w-4 h-4" />, label: '기준선' },
+  'self-backlog': { href: '/dashboard/self-analysis/backlog', icon: <ListTodo className="w-4 h-4" />, label: '백로그' },
+  'self-policy': { href: '/dashboard/self-analysis/policy', icon: <Shield className="w-4 h-4" />, label: '분석 정책' },
 };
 
 const menuSections: Record<string, { title: string; items: string[] }> = {
   analysis: { title: '분석', items: ['dashboard', 'execution', 'results', 'code-issues', 'improvements', 'architecture', 'dependencies', 'risk-heatmap', 'history'] },
+  selfAnalysis: { title: 'Self Analysis', items: ['self-analysis', 'self-baseline', 'self-backlog', 'self-policy'] },
   operations: { title: '운영', items: ['operations', 'agents', 'queue', 'resources', 'logs', 'approvals', 'notifications'] },
   admin: { title: '관리', items: ['admin-roles', 'admin-policies', 'admin-agents', 'admin-models', 'admin-audit', 'reports', 'settings'] },
 };
