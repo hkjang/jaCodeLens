@@ -1,0 +1,119 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search",
+    "filter": "Filter",
+    "refresh": "Refresh",
+    "close": "Close",
+    "confirm": "Confirm",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "all": "All",
+    "none": "None",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "execution": "Run Analysis",
+    "results": "Results",
+    "codeIssues": "Code Issues",
+    "improvements": "Improvements",
+    "architecture": "Architecture",
+    "dependencies": "Dependencies",
+    "riskHeatmap": "Risk Map",
+    "history": "History",
+    "notifications": "Notifications",
+    "operations": "Monitoring",
+    "agents": "Agents",
+    "queue": "Task Queue",
+    "resources": "Resources",
+    "logs": "Logs",
+    "approvals": "Approvals",
+    "reports": "Reports",
+    "settings": "Settings",
+    "adminRoles": "Role Management",
+    "adminPolicies": "Analysis Policies",
+    "adminAgents": "Agent Settings",
+    "adminModels": "AI Models",
+    "adminAudit": "Audit Log"
+  },
+  "sections": {
+    "analysis": "Analysis",
+    "operations": "Operations",
+    "admin": "Admin"
+  },
+  "roles": {
+    "developer": "Developer",
+    "operator": "Operator",
+    "architect": "Architect",
+    "admin": "Administrator",
+    "auditor": "Auditor"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "subtitle": "System Overview & Activity",
+    "projects": "Projects",
+    "pendingApprovals": "Pending Approvals",
+    "criticalIssues": "Critical Issues",
+    "recentActivity": "Recent Activity",
+    "actionRequired": "Action Required",
+    "thisWeek": "+{count} this week"
+  },
+  "operations": {
+    "title": "Operations Monitoring",
+    "subtitle": "Monitor system resources and agent status",
+    "agentStatus": "Agent Status",
+    "systemResources": "System Resources",
+    "cpu": "CPU",
+    "memory": "Memory",
+    "gpu": "GPU",
+    "queueSize": "Queue Size"
+  },
+  "agents": {
+    "healthy": "Healthy",
+    "degraded": "Degraded",
+    "unhealthy": "Unhealthy",
+    "restart": "Restart",
+    "throughput": "Throughput",
+    "latency": "Latency",
+    "failureRate": "Failure Rate"
+  },
+  "status": {
+    "pending": "Pending",
+    "queued": "Queued",
+    "running": "Running",
+    "completed": "Completed",
+    "failed": "Failed",
+    "timedOut": "Timed Out"
+  },
+  "analysis": {
+    "startAnalysis": "Start Analysis",
+    "selectProject": "Select Project",
+    "noResults": "No analysis results",
+    "score": "Score",
+    "issues": "Issues",
+    "severity": {
+      "critical": "Critical",
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low",
+      "info": "Info"
+    }
+  },
+  "accessibility": {
+    "skipToContent": "Skip to content",
+    "mainNavigation": "Main navigation",
+    "roleSelector": "Role selector",
+    "closeModal": "Close modal",
+    "expandMenu": "Expand menu",
+    "collapseMenu": "Collapse menu"
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "common": {
+    "loading": "로딩 중...",
+    "error": "오류가 발생했습니다",
+    "save": "저장",
+    "cancel": "취소",
+    "delete": "삭제",
+    "edit": "수정",
+    "create": "생성",
+    "search": "검색",
+    "filter": "필터",
+    "refresh": "새로고침",
+    "close": "닫기",
+    "confirm": "확인",
+    "back": "뒤로",
+    "next": "다음",
+    "previous": "이전",
+    "all": "전체",
+    "none": "없음",
+    "yes": "예",
+    "no": "아니오"
+  },
+  "nav": {
+    "dashboard": "대시보드",
+    "execution": "분석 실행",
+    "results": "분석 결과",
+    "codeIssues": "코드 이슈",
+    "improvements": "개선 제안",
+    "architecture": "아키텍처",
+    "dependencies": "의존성",
+    "riskHeatmap": "리스크 맵",
+    "history": "히스토리",
+    "notifications": "알림",
+    "operations": "모니터링",
+    "agents": "에이전트",
+    "queue": "작업 큐",
+    "resources": "리소스",
+    "logs": "로그",
+    "approvals": "승인 관리",
+    "reports": "리포트",
+    "settings": "설정",
+    "adminRoles": "역할 관리",
+    "adminPolicies": "분석 정책",
+    "adminAgents": "에이전트 설정",
+    "adminModels": "AI 모델",
+    "adminAudit": "감사 로그"
+  },
+  "sections": {
+    "analysis": "분석",
+    "operations": "운영",
+    "admin": "관리"
+  },
+  "roles": {
+    "developer": "개발자",
+    "operator": "운영자",
+    "architect": "아키텍트",
+    "admin": "관리자",
+    "auditor": "감사자"
+  },
+  "dashboard": {
+    "title": "대시보드",
+    "subtitle": "시스템 개요 및 활동",
+    "projects": "프로젝트",
+    "pendingApprovals": "대기 중 승인",
+    "criticalIssues": "심각한 이슈",
+    "recentActivity": "최근 활동",
+    "actionRequired": "조치 필요",
+    "thisWeek": "이번 주 +{count}건"
+  },
+  "operations": {
+    "title": "운영 모니터링",
+    "subtitle": "시스템 리소스 및 에이전트 상태를 모니터링합니다",
+    "agentStatus": "에이전트 상태",
+    "systemResources": "시스템 리소스",
+    "cpu": "CPU",
+    "memory": "메모리",
+    "gpu": "GPU",
+    "queueSize": "큐 대기"
+  },
+  "agents": {
+    "healthy": "정상",
+    "degraded": "지연",
+    "unhealthy": "비정상",
+    "restart": "재시작",
+    "throughput": "처리량",
+    "latency": "지연시간",
+    "failureRate": "실패율"
+  },
+  "status": {
+    "pending": "대기",
+    "queued": "큐 대기",
+    "running": "실행 중",
+    "completed": "완료",
+    "failed": "실패",
+    "timedOut": "시간초과"
+  },
+  "analysis": {
+    "startAnalysis": "분석 시작",
+    "selectProject": "프로젝트 선택",
+    "noResults": "분석 결과가 없습니다",
+    "score": "점수",
+    "issues": "이슈",
+    "severity": {
+      "critical": "심각",
+      "high": "높음",
+      "medium": "보통",
+      "low": "낮음",
+      "info": "정보"
+    }
+  },
+  "accessibility": {
+    "skipToContent": "본문으로 건너뛰기",
+    "mainNavigation": "메인 네비게이션",
+    "roleSelector": "역할 선택",
+    "closeModal": "모달 닫기",
+    "expandMenu": "메뉴 펼치기",
+    "collapseMenu": "메뉴 접기"
+  }
+}
