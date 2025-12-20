@@ -54,6 +54,13 @@ export class MultiAgentOrchestrator {
         }
       })
       analysisId = analysis.id
+      
+      // Audit Start
+      try {
+        const { logAudit } = await import('../../audit');
+        await logAudit('ANALYSIS_START', 'ANALYSIS', analysisId, 'SYSTEM');
+      } catch (e) { console.error('Audit failed', e); }
+
     } else {
        // Update existing to RUNNING
        await prisma.analysisExecute.update({
@@ -83,64 +90,112 @@ export class MultiAgentOrchestrator {
           }
         })
 
-        const start = Date.now()
-        try {
-          // Execute Agent Logic
-          const result = await agent.analyze({
-            projectContext: context,
-            previousResults: [], // For first pass, no previous results. In future, we might have tiered execution.
-            config: {}
-          })
+        const TIMEOUT_MS = 60000; // 1 minute timeout per agent
+        const MAX_RETRIES = 2;
 
-          // Save Agent Results to DB
-          for (const item of result.results) {
-             await prisma.analysisResult.create({
-               data: {
-                 executeId: currentAnalysisId,
-                 ...item
-               }
-             })
-          }
+        let attempt = 0;
+        let success = false;
+        let result: AgentResult = { results: [] };
 
-          // Save Dependencies (if any)
-          if (result.dependencies && result.dependencies.length > 0) {
-            await prisma.dependency.createMany({
-              data: result.dependencies.map(dep => ({
-                executeId: currentAnalysisId,
-                from: dep.from,
-                to: dep.to,
-                type: dep.type
-              }))
+        while (attempt <= MAX_RETRIES && !success) {
+          attempt++;
+          const start = Date.now();
+          
+          try {
+            // Execute Agent Logic with Timeout
+            const agentPromise = agent.analyze({
+              projectContext: context,
+              previousResults: [], 
+              config: {}
+            });
+
+            const timeoutPromise = new Promise<never>((_, reject) => 
+              setTimeout(() => reject(new Error('Agent execution timed out')), TIMEOUT_MS)
+            );
+
+            result = await Promise.race([agentPromise, timeoutPromise]);
+            success = true;
+
+            // Save Agent Results to DB
+            for (const item of result.results) {
+               await prisma.analysisResult.create({
+                 data: {
+                   executeId: currentAnalysisId,
+                   ...item
+                 }
+               })
+            }
+
+            // ... Dependency saving logic (omitted for brevity, assume unchanged or needs re-insertion) ...
+            if (result.dependencies && result.dependencies.length > 0) {
+              await prisma.dependency.createMany({
+                data: result.dependencies.map(dep => ({
+                  executeId: currentAnalysisId,
+                  from: dep.from,
+                  to: dep.to,
+                  type: dep.type
+                }))
+              })
+            }
+
+            // Update Agent Execution Status
+            await prisma.agentExecution.update({
+              where: { id: agentExec.id },
+              data: {
+                status: 'COMPLETED',
+                completedAt: new Date(),
+                durationMs: Date.now() - start
+              }
             })
+
+            // MLOps Logging (re-inserted)
+             try {
+               const { logModelExecution } = await import('../../mlops');
+               await logModelExecution(agentExec.id, agent.name, {
+                 latency: Date.now() - start,
+                 inputTokens: 0, 
+                 outputTokens: 0
+               });
+            } catch (e) {
+              console.error('MLOps logging failed', e);
+            }
+
+            return result;
+
+          } catch (err: any) {
+            console.error(`Agent ${agent.name} failed (Attempt ${attempt}):`, err);
+            
+            if (attempt > MAX_RETRIES) {
+               await prisma.agentExecution.update({
+                where: { id: agentExec.id },
+                data: {
+                  status: 'FAILED',
+                  completedAt: new Date(),
+                  durationMs: Date.now() - start
+                }
+              })
+              return { results: [] }
+            }
+            // If checking for retry, maybe log a warning.
           }
-
-          // Update Agent Execution Status
-          await prisma.agentExecution.update({
-            where: { id: agentExec.id },
-            data: {
-              status: 'COMPLETED',
-              completedAt: new Date(),
-              durationMs: Date.now() - start
-            }
-          })
-
-          return result
-
-        } catch (err) {
-          console.error(`Agent ${agent.name} failed:`, err)
-           await prisma.agentExecution.update({
-            where: { id: agentExec.id },
-            data: {
-              status: 'FAILED',
-              completedAt: new Date(),
-              durationMs: Date.now() - start
-            }
-          })
-          return { results: [] }
         }
+        return { results: [] }; // Should be unreachable if success loop works
       })
 
       await Promise.all(agentPromises)
+
+      // 2.2 Run Specialized Analysis
+      try {
+        const { runSpecializedAnalysis } = await import('../../analysis/specialized');
+        // Need to fetch project type to know what to run. 
+        // For efficiency, we assume context might have it, or fetch it.
+        const project = await prisma.project.findUnique({ where: { id: projectId } });
+        if (project && project.type) {
+           await runSpecializedAnalysis(project.type as any, projectId, currentAnalysisId);
+        }
+      } catch (e) {
+        console.error('Specialized analysis failed', e);
+      }
 
       // 2.5 Trigger Approvals
       const { triggerApprovalsIfNeeded, isExecutionBlocked } = await import('../../workflow');

@@ -1,13 +1,8 @@
 import { PrismaClient } from '@prisma/client'
 
 const prismaClientSingleton = () => {
-  const dbPath = process.env.DATABASE_URL || 'file:./dev.db'
   return new PrismaClient({
-    datasources: {
-      db: {
-        url: dbPath,
-      },
-    },
+    log: ['error', 'warn']
   })
 }
 
