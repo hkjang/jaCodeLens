@@ -1,1 +1,2 @@
-export { default as OperationsMonitor } from './OperationsMonitor';
+export { default as AgentMonitor, default as OperationsMonitor } from './AgentMonitor';
+export { default as TaskQueue } from './TaskQueue';
