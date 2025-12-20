@@ -1,0 +1,144 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  name        String
+  path        String   @unique
+  description String?
+  type        String?  // e.g., "NEXTJS", "PYTHON", "JAVA"
+  tier        String   @default("STANDARD") // "STANDARD", "ENTERPRISE"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  analyses    AnalysisExecute[]
+  stats       ProjectStats[]
+  ruleSets    RuleSet[]
+  risks       RiskAssessment[]
+}
+
+model AnalysisExecute {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status      String   // "PENDING", "RUNNING", "COMPLETED", "FAILED"
+  score       Float?
+  report      String? // Markdown report
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+  
+  results     AnalysisResult[]
+  agentExecutions AgentExecution[]
+}
+
+model AnalysisResult {
+  id              String          @id @default(uuid())
+  executeId       String
+  execute         AnalysisExecute @relation(fields: [executeId], references: [id], onDelete: Cascade)
+  category        String          // "QUALITY", "SECURITY", "ARCHITECTURE", "PERFORMANCE", "OPERATIONS"
+  severity        String          // "INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"
+  filePath        String?
+  lineNumber      Int?
+  message         String
+  suggestion      String?
+  confidenceScore Float           @default(1.0)
+  reasoning       String?         // Explainable AI reasoning
+  createdAt       DateTime        @default(now())
+  
+  // Relations to specific details
+  vulnerability   Vulnerability?
+  architecturalIssue ArchitecturalIssue?
+}
+
+model AgentExecution {
+  id          String   @id @default(uuid())
+  executeId   String
+  execute     AnalysisExecute @relation(fields: [executeId], references: [id], onDelete: Cascade)
+  agentName   String
+  status      String   // "PENDING", "RUNNING", "COMPLETED", "FAILED"
+  durationMs  Int?
+  tokensUsed  Int?
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+}
+
+model ProjectStats {
+  id              String   @id @default(uuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  timestamp       DateTime @default(now())
+  codeQualityScore Float?
+  securityScore   Float?
+  maintainabilityScore Float?
+  opsRiskScore    Float?
+}
+
+// --- Governance & Rules ---
+
+model RuleSet {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  rules       Rule[]
+}
+
+model Rule {
+  id          String   @id @default(uuid())
+  ruleSetId   String
+  ruleSet     RuleSet  @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+  key         String   // e.g., "no-console-log", "max-depth"
+  config      String?  // JSON config
+  severity    String   @default("MEDIUM")
+  category    String
+}
+
+// --- Security ---
+
+model Vulnerability {
+  id              String         @id @default(uuid())
+  resultId        String         @unique
+  result          AnalysisResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  cveId           String?
+  cvssScore       Float?
+  vector          String?
+  remediation     String?
+}
+
+// --- Architecture ---
+
+model ArchitecturalIssue {
+  id              String         @id @default(uuid())
+  resultId        String         @unique
+  result          AnalysisResult @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  issueType       String         // "CYCLE", "LAYER_VIOLATION", "DRIFT"
+  sourceComponent String?
+  targetComponent String?
+}
+
+model ServiceBoundary {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  definition  String? // Glob pattern or parsing rule
+}
+
+// --- Operations & Risk ---
+
+model RiskAssessment {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  riskLevel   String   // "LOW", "MEDIUM", "HIGH", "CRITICAL"
+  mttrEstimate Int?    // Hours
+  failureProb  Float?  // 0-1
+  createdAt   DateTime @default(now())
+}
