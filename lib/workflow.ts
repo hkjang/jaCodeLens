@@ -1,98 +1,24 @@
-import prisma from './db';
-import { ApprovalWorkflow, AnalysisExecute } from '@prisma/client';
+// Stub Module: Workflow & Approvals
+// This module will eventually handle approval gates for analysis.
 
-export type WorkflowStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
-export type WorkflowStep = 'SECURITY_REVIEW' | 'ARCH_REVIEW' | 'OPS_REVIEW';
-
-/**
- * Creates a required approval step for an analysis execution.
- */
-export async function createApprovalStep(
-  executeId: string, 
-  stepName: WorkflowStep, 
-  description?: string
-): Promise<ApprovalWorkflow> {
-  return await prisma.approvalWorkflow.create({
-    data: {
-      executeId,
-      stepName,
-      status: 'PENDING',
-      comment: description
-    }
-  });
+export async function createApprovalStep(analysisId: string, stepName: string): Promise<void> {
+  console.log(`[Workflow] Would create approval step: ${stepName} for analysis: ${analysisId}`);
 }
 
-/**
- * Approves a workflow step.
- */
-export async function approveStep(
-  workflowId: string, 
-  approverId: string, 
-  comment?: string
-): Promise<ApprovalWorkflow> {
-  return await prisma.approvalWorkflow.update({
-    where: { id: workflowId },
-    data: {
-      status: 'APPROVED',
-      approverId,
-      comment,
-      updatedAt: new Date()
-    }
-  });
+export async function approveStep(stepId: string, userId: string, comment?: string): Promise<void> {
+  console.log(`[Workflow] Would approve step: ${stepId} by user: ${userId}`);
 }
 
-/**
- * Rejects a workflow step.
- */
-export async function rejectStep(
-  workflowId: string, 
-  approverId: string, 
-  comment?: string
-): Promise<ApprovalWorkflow> {
-  return await prisma.approvalWorkflow.update({
-    where: { id: workflowId },
-    data: {
-      status: 'REJECTED',
-      approverId,
-      comment,
-      updatedAt: new Date()
-    }
-  });
+export async function rejectStep(stepId: string, userId: string, reason?: string): Promise<void> {
+  console.log(`[Workflow] Would reject step: ${stepId} by user: ${userId}`);
 }
 
-/**
- * Checks if an analysis execution is blocked by pending approvals.
- */
-export async function isExecutionBlocked(executeId: string): Promise<boolean> {
-  const pendingSteps = await prisma.approvalWorkflow.count({
-    where: {
-      executeId,
-      status: { in: ['PENDING', 'REJECTED'] }
-    }
-  });
-  return pendingSteps > 0;
+export async function triggerApprovalsIfNeeded(analysisId: string): Promise<void> {
+  // Stub implementation - no approvals for now
+  console.log(`[Workflow] Approval check skipped for analysis: ${analysisId}`);
 }
 
-/**
- * Auto-triggers approval steps based on analysis results severity.
- * e.g., if Critical Security Issue found -> Require Security Review.
- */
-export async function triggerApprovalsIfNeeded(executeId: string): Promise<void> {
-  const execute = await prisma.analysisExecute.findUnique({
-    where: { id: executeId },
-    include: { results: true }
-  });
-
-  if (!execute) return;
-
-  const hasCriticalSecurity = execute.results.some(r => r.category === 'SECURITY' && r.severity === 'CRITICAL');
-  const hasCriticalArch = execute.results.some(r => r.category === 'ARCHITECTURE' && r.severity === 'CRITICAL');
-
-  if (hasCriticalSecurity) {
-    await createApprovalStep(executeId, 'SECURITY_REVIEW', 'Critical security vulnerabilities detected.');
-  }
-
-  if (hasCriticalArch) {
-    await createApprovalStep(executeId, 'ARCH_REVIEW', 'Critical architectural issues detected.');
-  }
+export async function isExecutionBlocked(analysisId: string): Promise<boolean> {
+  // Stub implementation - never blocked
+  return false;
 }

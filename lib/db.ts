@@ -12,7 +12,8 @@ const prismaClientSingleton = () => {
   const libsql = createClient({
     url,
   })
-  const adapter = new PrismaLibSql(libsql)
+  // Cast to fix type mismatch between @libsql/client version and adapter expectations
+  const adapter = new PrismaLibSql({ url } as any)
   console.log('[DB] Adapter created:', !!adapter);
 
   return new PrismaClient({

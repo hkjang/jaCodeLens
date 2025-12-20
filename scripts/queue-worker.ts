@@ -8,78 +8,66 @@ import { analysisOrchestrator } from '../lib/analyzer/orchestrator'
 // In production, this would be a separate service or container.
 // It polls the DB for 'PENDING' jobs and executes them.
 
-const POLL_INTERVAL_MS = 5000
+import 'dotenv/config'
+import { taskQueue } from '../lib/queue'
+import { AgentOrchestrator } from '../lib/orchestrator'
+import { StructureAnalysisAgent } from '../lib/agents/structure-agent'
+import { QualityAnalysisAgent } from '../lib/agents/quality-agent'
+import { SecurityAnalysisAgent } from '../lib/agents/security-agent'
+import { DependencyAnalysisAgent } from '../lib/agents/dependency-agent'
+import { StyleAnalysisAgent } from '../lib/agents/style-agent'
+import { TestAnalysisAgent } from '../lib/agents/test-agent'
 
-async function processJob(executeId: string, projectId: string) {
-  console.log(`[Worker] Picking up job ${executeId} for project ${projectId}`)
-  
-  try {
-    // 1. Update status to RUNNING
-    // (Note: The orchestrator creates the record as RUNNING in analyzeProject, 
-    // but here we are simulating a "Queue" where jobs start as PENDING in DB)
-    
-    // Fetch project path
-    const project = await prisma.project.findUnique({ where: { id: projectId } })
-    if (!project) throw new Error('Project not found')
+const POLL_INTERVAL_MS = 2000
 
-    // 2. Run Analysis
-    console.log(`[Worker] Collecting files from ${project.path}...`)
-    const context = await collectProject(project.path)
-    
-    console.log(`[Worker] Starting Orchestrator...`)
-    // The orchestrator currently creates a NEW AnalysisExecute. 
-    // We should refactor Orchestrator to accept an existing ID or we just let it create one and link it?
-    // For "Enterprise" queue, we ideally want to create the record FIRST as PENDING, then update it.
-    
-    // To avoid refactoring entire Orchestrator right now, let's just count on the Orchestrator doing its thing
-    // and we just mark the "Queue Item" as processed. 
-    // BUT wait, `AnalysisExecute` IS the queue item essentially.
-    
-    // Let's modify Orchestrator to optionally accept an `executionId`? 
-    // Or we just update the wrapper here.
-    
-    // For this scalability MVP: 
-    // We assume the web UI created `AnalysisExecute` with status='PENDING'.
-    // We pass that ID to orchestrator.
-    
-    // *Wait*, `orchestrator.analyzeProject` creates a *new* record. 
-    // I should tweak `orchestrator.analyzeProject` to support taking an existing `analysisId`.
-    
-    // Temporary Hack: Let Orchestrator create a new one, but we link it or just log it.
-    // Better: Update Orchestrator.
-    
-    // Actually, let's look at `orchestrator.ts`. It creates `AnalysisExecute`.
-    // I'll update it to take optional ID.
-    
-    await analysisOrchestrator.analyzeProject(projectId, context, executeId)
-    
-    console.log(`[Worker] Job ${executeId} completed successfully.`)
+// Map Agent Names to Instances
+const agents = {
+  "StructureAnalysisAgent": new StructureAnalysisAgent(),
+  "QualityAnalysisAgent": new QualityAnalysisAgent(),
+  "SecurityAnalysisAgent": new SecurityAnalysisAgent(),
+  "DependencyAnalysisAgent": new DependencyAnalysisAgent(),
+  "StyleAnalysisAgent": new StyleAnalysisAgent(),
+  "TestAnalysisAgent": new TestAnalysisAgent(),
+};
 
-  } catch (error) {
-    console.error(`[Worker] Job ${executeId} failed:`, error)
-    await prisma.analysisExecute.update({
-        where: { id: executeId },
-        data: { status: 'FAILED', completedAt: new Date() }
-    })
-  }
-}
+const orchestrator = new AgentOrchestrator();
 
 async function startWorker() {
-  console.log('[Worker] Starting Queue Worker...')
+  console.log('[Worker] Starting DB-backed Queue Worker...')
   
   while (true) {
     try {
-      // Find one PENDING job
-      const job = await prisma.analysisExecute.findFirst({
-        where: { status: 'PENDING' },
-        orderBy: { startedAt: 'asc' }
-      })
+      // 1. Dequeue Next Task
+      const task = await taskQueue.dequeue();
 
-      if (job) {
-        await processJob(job.id, job.projectId)
+      if (task) {
+        console.log(`[Worker] Picked up task ${task.id} for agent ${task.agentExecution.agentName}`);
+        
+        const agentName = task.agentExecution.agentName;
+        const agent = agents[agentName as keyof typeof agents];
+
+        if (!agent) {
+            console.error(`[Worker] Unknown agent: ${agentName}`);
+            await taskQueue.fail(task.id, `Unknown agent: ${agentName}`);
+            continue;
+        }
+
+        try {
+            // 2. Execute Agent Logic
+            await agent.processTask(task);
+            
+            // 3. Mark Complete (and trigger orchestrator update)
+            // Note: Orchestrator.completeTask also updates the parent AgentExecution status
+            await orchestrator.completeTask(task.id, "COMPLETED");
+            console.log(`[Worker] Task ${task.id} completed.`);
+
+        } catch (err) {
+            console.error(`[Worker] Task ${task.id} failed:`, err);
+            await orchestrator.completeTask(task.id, "FAILED", err instanceof Error ? err.message : String(err));
+        }
+
       } else {
-        // No jobs, sleep
-        // console.log('[Worker] No jobs, sleeping...')
+        // No jobs, sleep small amount
       }
 
     } catch (err) {
@@ -88,6 +76,11 @@ async function startWorker() {
 
     await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
   }
+}
+
+// Check if running directly
+if (require.main === module) {
+  startWorker()
 }
 
 // Check if running directly

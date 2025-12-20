@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/db';
-import { getServerSession } from 'next-auth'; // Assuming auth is set up
-// If auth is not set up perfectly yet, we might skip session check for now or mock it.
+// Auth temporarily disabled until next-auth is configured
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const resultId = params.id;
+    const { id: resultId } = await params;
     const body = await req.json();
     const { reviewStatus, humanCorrection, comment } = body;
 

@@ -57,7 +57,7 @@ export class MultiAgentOrchestrator {
       
       // Audit Start
       try {
-        const { logAudit } = await import('../../audit');
+        const { logAudit } = await import('../audit');
         await logAudit('ANALYSIS_START', 'ANALYSIS', analysisId, 'SYSTEM');
       } catch (e) { console.error('Audit failed', e); }
 
@@ -150,7 +150,7 @@ export class MultiAgentOrchestrator {
 
             // MLOps Logging (re-inserted)
              try {
-               const { logModelExecution } = await import('../../mlops');
+               const { logModelExecution } = await import('../mlops');
                await logModelExecution(agentExec.id, agent.name, {
                  latency: Date.now() - start,
                  inputTokens: 0, 
@@ -186,7 +186,7 @@ export class MultiAgentOrchestrator {
 
       // 2.2 Run Specialized Analysis
       try {
-        const { runSpecializedAnalysis } = await import('../../analysis/specialized');
+        const { runSpecializedAnalysis } = await import('../analysis/specialized');
         // Need to fetch project type to know what to run. 
         // For efficiency, we assume context might have it, or fetch it.
         const project = await prisma.project.findUnique({ where: { id: projectId } });
@@ -198,7 +198,7 @@ export class MultiAgentOrchestrator {
       }
 
       // 2.5 Trigger Approvals
-      const { triggerApprovalsIfNeeded, isExecutionBlocked } = await import('../../workflow');
+      const { triggerApprovalsIfNeeded, isExecutionBlocked } = await import('../workflow');
       await triggerApprovalsIfNeeded(currentAnalysisId);
       
       const blocked = await isExecutionBlocked(currentAnalysisId);

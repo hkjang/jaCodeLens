@@ -1,5 +1,5 @@
 import prisma from '@/lib/db';
-import { getServerSession } from 'next-auth'; // Placeholder
+// Auth integration pending - session tracking will be added later
 
 export type AuditAction = 'ANALYSIS_START' | 'RESULT_MODIFIED' | 'APPROVED' | 'EXPORTED' | 'LOGIN' | 'LOGOUT';
 export type TargetType = 'PROJECT' | 'ANALYSIS' | 'RESULT' | 'USER';
