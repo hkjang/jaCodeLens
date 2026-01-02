@@ -139,20 +139,36 @@ export class TriggerService {
    * 분석 실행
    */
   private async executeAnalysis(triggerId: string, projectId: string): Promise<void> {
+    const startTime = Date.now();
+    console.log('');
+    console.log('╔══════════════════════════════════════════════════════════════╗');
+    console.log('║  🔬 SELF-ANALYSIS STARTED                                    ║');
+    console.log('╚══════════════════════════════════════════════════════════════╝');
+    
     try {
+      // Get project info for logging
+      const project = await prisma.project.findUnique({ where: { id: projectId } });
+      console.log(`📂 Project: ${project?.name || projectId}`);
+      console.log(`📍 Path: ${project?.path || 'unknown'}`);
+      
       // 1. 트리거 상태 업데이트
       await prisma.analysisTrigger.update({
         where: { id: triggerId },
         data: { status: 'RUNNING' }
       });
+      console.log('✓ Trigger status: RUNNING');
       
       // 2. 활성 에이전트 목록 조회 (Admin에서 설정)
       const activeAgents = await this.getActiveAgentNames();
       if (activeAgents.length === 0) {
         throw new Error('No active agents configured. Please enable agents in Admin > Agents.');
       }
+      console.log(`🤖 Active Agents (${activeAgents.length}):`);
+      activeAgents.forEach((a, i) => console.log(`   ${i + 1}. ${a}`));
       
       // 3. 분석 실행 시작
+      console.log('');
+      console.log('🚀 Starting analysis execution...');
       const execution = await this.orchestrator.startAnalysis(projectId, activeAgents);
       
       // 4. 트리거에 실행 ID 연결
@@ -161,7 +177,13 @@ export class TriggerService {
         data: { executionId: execution.id }
       });
       
-      console.log(`[Trigger] Analysis started: ${execution.id} with agents: ${activeAgents.join(', ')}`);
+      const elapsed = Date.now() - startTime;
+      console.log('');
+      console.log(`✅ Analysis dispatched in ${elapsed}ms`);
+      console.log(`   Execution ID: ${execution.id}`);
+      console.log('   Agents are now processing in parallel...');
+      console.log('');
+      
       
     } catch (error) {
       // 에러 발생 시 트리거 실패 처리
@@ -316,16 +338,61 @@ export class TriggerService {
     const totalTasks = agentProgress.reduce((s, a) => s + (a.tasksTotal || 1), 0);
     const completedTasks = agentProgress.reduce((s, a) => s + (a.tasksCompleted || (a.status === 'COMPLETED' ? 1 : 0)), 0);
     
+    // Get estimated file count from project (if available)
+    let estimatedFileCount = 0;
+    let projectName = '';
+    try {
+      if (trigger.selfProject?.project) {
+        const project = trigger.selfProject.project;
+        projectName = project.name;
+        // Calculate estimated file count from project stats or use default
+        // Try to get fileCount from project summary or use estimate
+        const stats = project.summary ? JSON.parse(project.summary) : null;
+        estimatedFileCount = stats?.fileCount || stats?.totalFiles || 50; // Default estimate
+      }
+    } catch (e) {
+      estimatedFileCount = 50; // Fallback
+    }
+    
+    // Calculate simulated file progress based on elapsed time and agent status
+    const completedAgents = agentProgress.filter(a => a.status === 'COMPLETED').length;
+    const runningAgents = agentProgress.filter(a => a.status === 'RUNNING').length;
+    const totalAgents = agentProgress.length;
+    
+    // Estimate: each agent processes ~= total_files files
+    // Completed agents = their file portion complete
+    // Running agent = partially complete based on simulated time
+    const elapsedMs = trigger.triggeredAt 
+      ? Date.now() - new Date(trigger.triggeredAt).getTime() 
+      : 0;
+    
+    // Simulate file progress for running agents (assume 2 files/second average)
+    const filesPerAgent = Math.ceil(estimatedFileCount / Math.max(totalAgents, 1));
+    const simulatedFilesInProgress = Math.min(
+      Math.floor(elapsedMs / 500) % filesPerAgent, // Reset every agent
+      filesPerAgent
+    );
+    
+    const estimatedFilesCompleted = (completedAgents * filesPerAgent) + 
+      (runningAgents > 0 ? simulatedFilesInProgress : 0);
+    
     const progress = {
       total: agentProgress.length,
-      completed: agentProgress.filter(a => a.status === 'COMPLETED').length,
-      running: agentProgress.filter(a => a.status === 'RUNNING').length,
+      completed: completedAgents,
+      running: runningAgents,
       pending: agentProgress.filter(a => a.status === 'PENDING').length,
       failed: agentProgress.filter(a => a.status === 'FAILED').length,
       // Task-level progress
       totalTasks,
       completedTasks,
-      taskPercent: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+      taskPercent: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+      // File-level estimate for UI
+      estimatedTotalFiles: estimatedFileCount,
+      estimatedFilesCompleted: Math.min(estimatedFilesCompleted, estimatedFileCount),
+      filePercent: estimatedFileCount > 0 
+        ? Math.round((estimatedFilesCompleted / estimatedFileCount) * 100)
+        : 0,
+      projectName
     };
     
     return {

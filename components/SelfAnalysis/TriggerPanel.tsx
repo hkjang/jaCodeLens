@@ -230,9 +230,19 @@ export function TriggerPanel({
                 </div>
                 <div>
                   <h3 className="font-bold text-lg">분석 진행 중</h3>
-                  <div className="flex items-center gap-2 text-white/80 text-sm">
-                    <Timer className="w-3.5 h-3.5" />
-                    <span>경과 시간: {formatElapsed(elapsedTime)}</span>
+                  <div className="flex items-center gap-3 text-white/80 text-sm">
+                    <span className="flex items-center gap-1">
+                      <Timer className="w-3.5 h-3.5" />
+                      {formatElapsed(elapsedTime)}
+                    </span>
+                    {runningDetails?.progress?.estimatedTotalFiles > 0 && (
+                      <span className="flex items-center gap-1 px-2 py-0.5 bg-white/20 rounded-full">
+                        📂 파일 {runningDetails.progress.estimatedFilesCompleted || 0}/{runningDetails.progress.estimatedTotalFiles}
+                      </span>
+                    )}
+                    {runningDetails?.progress?.projectName && (
+                      <span className="opacity-70">{runningDetails.progress.projectName}</span>
+                    )}
                   </div>
                 </div>
               </div>

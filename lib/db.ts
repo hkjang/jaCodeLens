@@ -7,14 +7,10 @@ import { PrismaClient } from '@prisma/client'
 import { PrismaLibSql } from '@prisma/adapter-libsql'
 
 const prismaClientSingleton = () => {
-  console.log('[DB] Initializing with URL:', DB_URL);
-  
   // Prisma 7.x: Pass config options directly to PrismaLibSql adapter
-  // Instead of creating a libsql client first, pass the url directly
   const adapter = new PrismaLibSql({
     url: DB_URL,
   })
-  console.log('[DB] Adapter created:', !!adapter);
 
   return new PrismaClient({
     adapter,
@@ -37,4 +33,3 @@ export function setPrisma(mock: any) {
 export default prisma
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
-
