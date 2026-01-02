@@ -57,6 +57,9 @@ export default function CodeElementsPage() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
 
   // 프로젝트 ID 가져오기
   useEffect(() => {
@@ -213,6 +216,71 @@ export default function CodeElementsPage() {
     }
   };
 
+  // 즐겨찾기 토글
+  const toggleFavorite = (id: string) => {
+    setFavorites(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      // localStorage에 저장
+      localStorage.setItem('code-elements-favorites', JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  // 즐겨찾기 불러오기
+  useEffect(() => {
+    const saved = localStorage.getItem('code-elements-favorites');
+    if (saved) {
+      try {
+        setFavorites(new Set(JSON.parse(saved)));
+      } catch {}
+    }
+  }, []);
+
+  // 선택 토글
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // 전체 선택/해제
+  const toggleSelectAll = () => {
+    if (selectedIds.size === elements.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(elements.map(el => el.id)));
+    }
+  };
+
+  // 선택된 요소 일괄 분석
+  const analyzeSelected = async () => {
+    if (selectedIds.size === 0) return;
+    setAnalyzing(true);
+    for (const id of selectedIds) {
+      try {
+        await fetch('/api/code-elements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, action: 'analyze', elementId: id })
+        });
+      } catch {}
+    }
+    setSelectedIds(new Set());
+    await loadData();
+    setAnalyzing(false);
+  };
+
   // 코드 복사
   const copyCode = useCallback((code: string) => {
     navigator.clipboard.writeText(code);
@@ -267,6 +335,9 @@ export default function CodeElementsPage() {
 
   // 검색 및 빠른 필터 적용
   const filteredElements = elements.filter(el => {
+    // 즐겨찾기 필터
+    if (showOnlyFavorites && !favorites.has(el.id)) return false;
+    
     // 검색 필터
     if (searchText) {
       const search = searchText.toLowerCase();
@@ -783,10 +854,67 @@ export default function CodeElementsPage() {
           {/* Elements List */}
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
             <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                <Folder className="w-4 h-4" />
-                코드 요소 목록
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Folder className="w-4 h-4" />
+                  코드 요소 목록
+                  {favorites.size > 0 && (
+                    <span className="text-xs text-yellow-600">⭐{favorites.size}</span>
+                  )}
+                </h3>
+                <div className="flex items-center gap-2">
+                  {/* View Mode Tabs */}
+                  <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5">
+                    <button
+                      onClick={() => setViewMode('tree')}
+                      className={`px-2 py-1 text-xs rounded ${viewMode === 'tree' ? 'bg-white dark:bg-gray-600 shadow' : ''}`}
+                    >
+                      🌲 트리
+                    </button>
+                    <button
+                      onClick={() => setViewMode('list')}
+                      className={`px-2 py-1 text-xs rounded ${viewMode === 'list' ? 'bg-white dark:bg-gray-600 shadow' : ''}`}
+                    >
+                      📋 리스트
+                    </button>
+                  </div>
+                  {/* Favorites Toggle */}
+                  <button
+                    onClick={() => setShowOnlyFavorites(!showOnlyFavorites)}
+                    className={`px-2 py-1 text-xs rounded-lg transition ${
+                      showOnlyFavorites 
+                        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' 
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                    }`}
+                  >
+                    ⭐ 즐겨찾기
+                  </button>
+                </div>
+              </div>
+              
+              {/* Bulk Selection Bar */}
+              {selectedIds.size > 0 && (
+                <div className="mt-3 flex items-center justify-between p-2 bg-violet-50 dark:bg-violet-900/20 rounded-lg">
+                  <span className="text-sm text-violet-700 dark:text-violet-300">
+                    {selectedIds.size}개 선택됨
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={analyzeSelected}
+                      disabled={analyzing}
+                      className="px-2 py-1 text-xs bg-violet-600 text-white rounded hover:bg-violet-700 disabled:opacity-50"
+                    >
+                      {analyzing ? '분석 중...' : '✨ 일괄 분석'}
+                    </button>
+                    <button
+                      onClick={() => setSelectedIds(new Set())}
+                      className="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-600 rounded hover:bg-gray-300"
+                    >
+                      ✕ 취소
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             
             <div className="max-h-[600px] overflow-y-auto">
@@ -824,43 +952,77 @@ export default function CodeElementsPage() {
                       
                       {expandedFiles.has(filePath) && (
                         <div className="bg-gray-50 dark:bg-gray-900/50">
-                          {fileElements.map(el => (
-                            <button
-                              key={el.id}
-                              onClick={() => setSelectedElement(el)}
-                              className={`w-full flex items-center gap-2 px-4 py-2 pl-10 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition text-left ${
-                                selectedElement?.id === el.id ? 'bg-violet-50 dark:bg-violet-900/20 border-l-2 border-violet-500' : ''
-                              }`}
-                            >
-                              <span className={`px-1.5 py-0.5 rounded text-xs ${getTypeColor(el.elementType)}`}>
-                                {getTypeIcon(el.elementType)}
-                              </span>
-                              <span className="text-sm text-gray-900 dark:text-white font-mono truncate flex-1">
-                                {el.name}
-                              </span>
-                              {/* Badges */}
-                              <div className="flex items-center gap-1 flex-shrink-0">
-                                {el.isAsync && (
-                                  <span className="px-1 py-0.5 bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 rounded text-[10px]">
-                                    async
+                          {fileElements.map(el => {
+                            const lineCount = getLineCount(el);
+                            const complexityColor = lineCount > 100 ? 'text-red-500' : lineCount > 50 ? 'text-yellow-500' : 'text-green-500';
+                            
+                            return (
+                              <div
+                                key={el.id}
+                                className={`flex items-center gap-1 px-4 py-2 pl-8 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition ${
+                                  selectedElement?.id === el.id ? 'bg-violet-50 dark:bg-violet-900/20 border-l-2 border-violet-500' : ''
+                                }`}
+                              >
+                                {/* Checkbox */}
+                                <input
+                                  type="checkbox"
+                                  checked={selectedIds.has(el.id)}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    toggleSelect(el.id);
+                                  }}
+                                  className="w-3.5 h-3.5 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                                />
+                                
+                                {/* Favorite Star */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleFavorite(el.id);
+                                  }}
+                                  className={`p-0.5 transition ${favorites.has(el.id) ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'}`}
+                                >
+                                  {favorites.has(el.id) ? '⭐' : '☆'}
+                                </button>
+                                
+                                {/* Main Button */}
+                                <button
+                                  onClick={() => setSelectedElement(el)}
+                                  className="flex items-center gap-2 flex-1 text-left min-w-0"
+                                >
+                                  <span className={`px-1.5 py-0.5 rounded text-xs ${getTypeColor(el.elementType)}`}>
+                                    {getTypeIcon(el.elementType)}
                                   </span>
-                                )}
-                                {el.isExported && (
-                                  <span className="px-1 py-0.5 bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 rounded text-[10px]">
-                                    exp
+                                  <span className="text-sm text-gray-900 dark:text-white font-mono truncate flex-1">
+                                    {el.name}
                                   </span>
-                                )}
-                                <span className="text-[10px] text-gray-400 w-8 text-right">
-                                  {getLineCount(el)}L
-                                </span>
-                                {el.analyzedAt ? (
-                                  <CheckCircle className="w-3.5 h-3.5 text-green-500" />
-                                ) : (
-                                  <Clock className="w-3.5 h-3.5 text-gray-300" />
-                                )}
+                                </button>
+                                
+                                {/* Badges */}
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  {el.isAsync && (
+                                    <span className="px-1 py-0.5 bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400 rounded text-[10px]">
+                                      async
+                                    </span>
+                                  )}
+                                  {el.isExported && (
+                                    <span className="px-1 py-0.5 bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 rounded text-[10px]">
+                                      exp
+                                    </span>
+                                  )}
+                                  {/* Complexity Color */}
+                                  <span className={`text-[10px] ${complexityColor} font-medium w-8 text-right`}>
+                                    {lineCount}L
+                                  </span>
+                                  {el.analyzedAt ? (
+                                    <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                                  ) : (
+                                    <Clock className="w-3.5 h-3.5 text-gray-300" />
+                                  )}
+                                </div>
                               </div>
-                            </button>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
