@@ -1,5 +1,6 @@
 import { AgentTask } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { aiModelService, ChatMessage } from "@/lib/ai-model-service";
 
 export interface AnalysisContext {
   projectId: string;
@@ -65,7 +66,41 @@ export abstract class BaseAgent {
   }
 
   /**
+   * Call the configured AI model for analysis.
+   * Uses the default AI model set in admin (Ollama qwen3:8b or OpenAI, etc.)
+   */
+  protected async callAI(systemPrompt: string, userPrompt: string): Promise<string> {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ];
+
+    console.log(`[${this.name}] Calling AI model...`);
+    
+    try {
+      const response = await aiModelService.chatCompletion({ messages });
+      console.log(`[${this.name}] AI response received`);
+      return response;
+    } catch (error) {
+      console.error(`[${this.name}] AI call failed:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the current default AI model info
+   */
+  protected async getAIModelInfo(): Promise<{ name: string; provider: string } | null> {
+    const model = await aiModelService.getDefaultModel();
+    if (model) {
+      return { name: model.name, provider: model.provider };
+    }
+    return null;
+  }
+
+  /**
    * The core logic to be implemented by subclasses.
    */
   protected abstract execute(task: AgentTask): Promise<any>;
 }
+

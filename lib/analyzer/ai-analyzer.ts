@@ -1,6 +1,7 @@
 import { ProjectContext } from '../collector/types'
 import { StaticAnalysisResult } from './types'
-import { aiClient, DEFAULT_MODEL } from '../ai/client'
+import { aiModelService } from '../ai-model-service'
+import { promptRegistry } from '../prompt-registry'
 
 export async function analyzeProjectWithAI(
   context: ProjectContext, 
@@ -25,47 +26,27 @@ export async function analyzeProjectWithAI(
     }
   }
 
-  const prompt = `
-You are a Senior Software Architect and Code Auditor.
-Analyze the following project summary and provide a comprehensive audit report.
-
-## Project Structure
-${fileList}
-(and more...)
-
-## Dependencies
-${dependencies}
-
-## Static Analysis Summary
-${issuesSummary}
-
-## Key Complex Files (Excerpt)
-${fileContents}
-
-## Instructions
-Provide a report in Markdown format with the following sections:
-1. **Executive Summary**: Overall health and risk assessment.
-2. **Architecture Review**: Comments on structure and dependencies.
-3. **Code Quality**: Feedback on complexity and maintainability based on the provided files.
-4. **Security Risks**: Highlight any observed risks (from static analysis or general patterns).
-5. **Recommendations**: Prioritized list of improvements.
-
-Be concise and professional.
-`
-
   try {
-    const response = await aiClient.chat.completions.create({
-      model: DEFAULT_MODEL,
+    // 프롬프트 레지스트리에서 프롬프트 조회 및 렌더링
+    const { system, user } = await promptRegistry.render('analyzer.project-audit', {
+      fileList,
+      dependencies,
+      issuesSummary,
+      fileContents
+    })
+
+    const response = await aiModelService.chatCompletion({
       messages: [
-        { role: 'system', content: 'You are an expert code auditor.' },
-        { role: 'user', content: prompt }
+        { role: 'system', content: system },
+        { role: 'user', content: user }
       ],
       temperature: 0.2
     })
 
-    return response.choices[0]?.message?.content || 'No analysis generated.'
+    return response || 'No analysis generated.'
   } catch (error) {
     console.error('AI Analysis failed:', error)
     return `AI Analysis Failed: ${(error as Error).message}`
   }
 }
+

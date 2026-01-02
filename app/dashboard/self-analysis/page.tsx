@@ -290,6 +290,7 @@ export default function SelfAnalysisPage() {
         onManualTrigger={handleManualTrigger}
         onToggleTrigger={handleToggleTrigger}
         isTriggering={isTriggering}
+        onRefresh={fetchData}
       />
 
       {/* Growth History */}

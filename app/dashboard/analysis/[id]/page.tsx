@@ -22,8 +22,9 @@ async function getAnalysisDetails(id: string) {
   }
 }
 
-export default async function AnalysisPage({ params }: { params: { id: string } }) {
-  const data = await getAnalysisDetails(params.id);
+export default async function AnalysisPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const data = await getAnalysisDetails(id);
 
   if (!data) return <div>Analysis not found (or DB error)</div>;
 

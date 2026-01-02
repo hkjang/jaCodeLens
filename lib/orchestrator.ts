@@ -128,4 +128,100 @@ export class AgentOrchestrator {
       });
     }
   }
+
+  /**
+   * Cancels an ongoing analysis execution.
+   */
+  async cancelAnalysis(executionId: string): Promise<void> {
+    // Update the main execution status
+    await prisma.analysisExecute.update({
+      where: { id: executionId },
+      data: {
+        status: "CANCELLED",
+        completedAt: new Date(),
+      },
+    });
+
+    // Cancel all pending/running agent executions
+    await prisma.agentExecution.updateMany({
+      where: {
+        executeId: executionId,
+        status: { in: ["PENDING", "RUNNING"] },
+      },
+      data: {
+        status: "CANCELLED",
+        completedAt: new Date(),
+      },
+    });
+
+    // Cancel all pending/running tasks
+    await prisma.agentTask.updateMany({
+      where: {
+        agentExecution: { executeId: executionId },
+        status: { in: ["QUEUED", "RUNNING"] },
+      },
+      data: {
+        status: "CANCELLED",
+        completedAt: new Date(),
+      },
+    });
+
+    console.log(`Analysis ${executionId} cancelled`);
+  }
+
+  /**
+   * Gets the progress of an analysis execution.
+   */
+  async getAnalysisProgress(executionId: string): Promise<AnalysisProgress> {
+    const execution = await prisma.analysisExecute.findUnique({
+      where: { id: executionId },
+      include: {
+        agentExecutions: {
+          include: { tasks: true },
+        },
+      },
+    });
+
+    if (!execution) {
+      throw new Error(`Execution not found: ${executionId}`);
+    }
+
+    const agents = execution.agentExecutions.map((ae) => ({
+      name: ae.agentName,
+      status: ae.status,
+      durationMs: ae.durationMs,
+      tokensUsed: ae.tokensUsed,
+      tasksTotal: ae.tasks.length,
+      tasksCompleted: ae.tasks.filter((t) => t.status === "COMPLETED").length,
+    }));
+
+    return {
+      executionId,
+      status: execution.status,
+      total: agents.length,
+      completed: agents.filter((a) => a.status === "COMPLETED").length,
+      running: agents.filter((a) => a.status === "RUNNING").length,
+      pending: agents.filter((a) => a.status === "PENDING").length,
+      failed: agents.filter((a) => a.status === "FAILED").length,
+      agents,
+    };
+  }
+}
+
+export interface AnalysisProgress {
+  executionId: string;
+  status: string;
+  total: number;
+  completed: number;
+  running: number;
+  pending: number;
+  failed: number;
+  agents: {
+    name: string;
+    status: string;
+    durationMs: number | null;
+    tokensUsed: number | null;
+    tasksTotal: number;
+    tasksCompleted: number;
+  }[];
 }

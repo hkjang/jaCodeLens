@@ -1,21 +1,19 @@
+// Force set DATABASE_URL before any Prisma imports
+// This is necessary because .env might have an empty DATABASE_URL
+const DB_URL = 'file:./prisma/dev.db';
+process.env.DATABASE_URL = DB_URL;
+
 import { PrismaClient } from '@prisma/client'
 import { PrismaLibSql } from '@prisma/adapter-libsql'
-import { createClient } from '@libsql/client'
-import path from 'path'
 
 const prismaClientSingleton = () => {
-  // File-based SQLite for persistent data
-  const dbPath = path.resolve(process.cwd(), 'prisma', 'dev.db');
-  const url = `file:${dbPath}`;
+  console.log('[DB] Initializing with URL:', DB_URL);
   
-  process.env.DATABASE_URL = url;
-  console.log('[DB] Initializing with URL:', url);
-  
-  const libsql = createClient({
-    url,
+  // Prisma 7.x: Pass config options directly to PrismaLibSql adapter
+  // Instead of creating a libsql client first, pass the url directly
+  const adapter = new PrismaLibSql({
+    url: DB_URL,
   })
-  // Cast to fix type mismatch between @libsql/client version and adapter expectations
-  const adapter = new PrismaLibSql(libsql as any)
   console.log('[DB] Adapter created:', !!adapter);
 
   return new PrismaClient({

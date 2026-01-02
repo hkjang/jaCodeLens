@@ -4,8 +4,6 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
-  engineType = "wasm"
 }
 
 model Project {
@@ -390,3 +388,89 @@ model ModelExecution {
   drift       Float?   // 0-1 drift score
   createdAt   DateTime @default(now())
 }
+
+// --- AI Model Configuration ---
+
+model AiModel {
+  id          String   @id @default(uuid())
+  name        String   // e.g., "qwen3:8b", "gpt-4o"
+  provider    String   // e.g., "Ollama", "OpenAI", "Anthropic"
+  version     String?  // e.g., "2024-05"
+  endpoint    String?  // API endpoint URL for Ollama or custom providers
+  apiKey      String?  // API key (encrypted or null for local models)
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  
+  // Performance metrics
+  latency     Float    @default(0)   // Average latency in seconds
+  accuracy    Float    @default(0)   // Accuracy percentage (0-100)
+  costPerToken Float   @default(0)   // Cost per 1K tokens
+  
+  // Usage tracking
+  usageToday  Int      @default(0)
+  usageTotal  Int      @default(0)
+  
+  // Configuration
+  contextWindow Int?   // Max context window size
+  maxTokens     Int?   // Max output tokens
+  temperature   Float  @default(0.7)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// --- AI Prompt Management ---
+
+model AiPrompt {
+  id                 String   @id @default(uuid())
+  key                String   @unique  // e.g., "ai-judge.synthesis"
+  name               String              // Display name
+  description        String?             // Description
+  category           String              // ANALYSIS, JUDGE, AGENT, etc.
+  systemPrompt       String              // System prompt content
+  userPromptTemplate String?             // User prompt template with {{variables}}
+  variables          String?             // JSON array of available variables
+  isActive           Boolean  @default(true)
+  version            Int      @default(1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  
+  // Relation to agents
+  agents             AgentConfig[]
+}
+
+// --- Agent Configuration ---
+
+model AgentConfig {
+  id           String   @id @default(uuid())
+  name         String   @unique  // e.g., "SecurityAnalysisAgent"
+  displayName  String              // Display name in UI
+  description  String?             // Agent description
+  category     String   @default("ANALYSIS")  // ANALYSIS, SECURITY, QUALITY, etc.
+  
+  // Execution settings
+  isEnabled    Boolean  @default(true)
+  priority     Int      @default(1)       // Lower = higher priority
+  timeout      Int      @default(60)      // Timeout in seconds
+  maxRetries   Int      @default(3)       // Max retry attempts
+  
+  // Relations
+  promptId     String?             // Connected prompt key
+  prompt       AiPrompt? @relation(fields: [promptId], references: [id])
+  modelId      String?             // Specific model override (null = use default)
+  
+  // Status and metrics
+  status       String   @default("idle")  // idle, active, error
+  lastRunAt    DateTime?
+  totalRuns    Int      @default(0)
+  successRuns  Int      @default(0)
+  failedRuns   Int      @default(0)
+  avgDuration  Float    @default(0)
+  
+  // Config
+  config       String?             // JSON additional config
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+

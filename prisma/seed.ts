@@ -102,6 +102,28 @@ CREATE TABLE IF NOT EXISTS AuditLog (
   timestamp TEXT DEFAULT (datetime('now')),
   ipAddress TEXT
 );
+
+-- AI Models
+CREATE TABLE IF NOT EXISTS AiModel (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  version TEXT,
+  endpoint TEXT,
+  apiKey TEXT,
+  isDefault INTEGER DEFAULT 0,
+  isActive INTEGER DEFAULT 1,
+  latency REAL DEFAULT 0,
+  accuracy REAL DEFAULT 0,
+  costPerToken REAL DEFAULT 0,
+  usageToday INTEGER DEFAULT 0,
+  usageTotal INTEGER DEFAULT 0,
+  contextWindow INTEGER,
+  maxTokens INTEGER,
+  temperature REAL DEFAULT 0.7,
+  createdAt TEXT DEFAULT (datetime('now')),
+  updatedAt TEXT DEFAULT (datetime('now'))
+);
 `;
 
 async function main() {
@@ -256,10 +278,79 @@ async function main() {
   }
   console.log('✓ Created audit logs');
 
+  // AI Models - Clear and seed
+  await libsql.execute('DELETE FROM AiModel');
+  
+  const aiModels = [
+    { 
+      id: randomUUID(), 
+      name: 'qwen3:8b', 
+      provider: 'Ollama', 
+      version: 'latest',
+      endpoint: 'http://localhost:11434',
+      apiKey: null,
+      isDefault: 1, 
+      isActive: 1, 
+      latency: 0.3, 
+      accuracy: 85, 
+      costPerToken: 0,  // Free local model
+      usageToday: 0,
+      usageTotal: 0,
+      contextWindow: 32768,
+      maxTokens: 8192,
+      temperature: 0.7
+    },
+    { 
+      id: randomUUID(), 
+      name: 'gpt-4o', 
+      provider: 'OpenAI', 
+      version: '2024-05',
+      endpoint: 'https://api.openai.com/v1',
+      apiKey: null, // Set in .env
+      isDefault: 0, 
+      isActive: 0,  // Disabled by default 
+      latency: 1.2, 
+      accuracy: 95, 
+      costPerToken: 0.015,
+      usageToday: 0,
+      usageTotal: 0,
+      contextWindow: 128000,
+      maxTokens: 4096,
+      temperature: 0.7
+    },
+    { 
+      id: randomUUID(), 
+      name: 'gpt-4o-mini', 
+      provider: 'OpenAI', 
+      version: '2024-07',
+      endpoint: 'https://api.openai.com/v1',
+      apiKey: null,
+      isDefault: 0, 
+      isActive: 0, 
+      latency: 0.5, 
+      accuracy: 88, 
+      costPerToken: 0.0003,
+      usageToday: 0,
+      usageTotal: 0,
+      contextWindow: 128000,
+      maxTokens: 16384,
+      temperature: 0.7
+    }
+  ];
+
+  for (const model of aiModels) {
+    await libsql.execute({
+      sql: `INSERT INTO AiModel (id, name, provider, version, endpoint, apiKey, isDefault, isActive, latency, accuracy, costPerToken, usageToday, usageTotal, contextWindow, maxTokens, temperature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [model.id, model.name, model.provider, model.version, model.endpoint, model.apiKey, model.isDefault, model.isActive, model.latency, model.accuracy, model.costPerToken, model.usageToday, model.usageTotal, model.contextWindow, model.maxTokens, model.temperature]
+    });
+  }
+  console.log(`✓ Created ${aiModels.length} AI models (Ollama qwen3:8b as default)`);
+
   console.log('\n✅ Database seeding completed!');
   console.log(`   - ${projects.length} projects`);
   console.log(`   - ${analysisData.length} analyses`);
   console.log(`   - ${totalResults} analysis results`);
+  console.log(`   - ${aiModels.length} AI models`);
 }
 
 main()

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import OpenAI from "openai";
+import { aiModelService } from "@/lib/ai-model-service";
 
 /**
  * ComprehensiveAIJudge - Final Synthesis Layer
@@ -11,13 +11,19 @@ import OpenAI from "openai";
  * 4. Executive summary
  */
 export class ComprehensiveAIJudge {
-  private openai: OpenAI | null = null;
+  private aiAvailable: boolean = false;
 
   constructor() {
-    if (process.env.OPENAI_API_KEY) {
-      this.openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
-      });
+    // AI availability will be checked at runtime
+    this.checkAIAvailability();
+  }
+
+  private async checkAIAvailability(): Promise<void> {
+    try {
+      const model = await aiModelService.getDefaultModel();
+      this.aiAvailable = model !== null;
+    } catch {
+      this.aiAvailable = false;
     }
   }
 
@@ -49,10 +55,20 @@ export class ComprehensiveAIJudge {
     let summary: string;
     let recommendations: string[];
 
-    if (this.openai) {
-      const aiResponse = await this.generateAISummary(results, scores);
-      summary = aiResponse.summary;
-      recommendations = aiResponse.recommendations;
+    // Check if AI model is available
+    const defaultModel = await aiModelService.getDefaultModel();
+    
+    if (defaultModel) {
+      try {
+        const aiResponse = await this.generateAISummary(results, scores);
+        summary = aiResponse.summary;
+        recommendations = aiResponse.recommendations;
+      } catch (error) {
+        console.error("[AIJudge] AI summary failed, using heuristics:", error);
+        const heuristicResponse = this.generateHeuristicSummary(categories, scores);
+        summary = heuristicResponse.summary;
+        recommendations = heuristicResponse.recommendations;
+      }
     } else {
       const heuristicResponse = this.generateHeuristicSummary(categories, scores);
       summary = heuristicResponse.summary;
@@ -161,35 +177,32 @@ export class ComprehensiveAIJudge {
     results: any[],
     scores: Record<string, number>
   ): Promise<{ summary: string; recommendations: string[] }> {
-    const prompt = `
-You are a senior code review expert. Analyze the following code analysis results and provide:
-1. A 2-3 sentence executive summary
-2. Top 5 prioritized action items
-
-Analysis Results:
-${JSON.stringify(results.slice(0, 20), null, 2)}
-
-Category Scores:
-${JSON.stringify(scores, null, 2)}
-
-Respond in JSON format:
-{
-  "summary": "...",
-  "recommendations": ["item1", "item2", ...]
-}
-`;
-
     try {
-      const response = await this.openai!.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
+      // 프롬프트 레지스트리에서 프롬프트 조회 및 렌더링
+      const { promptRegistry } = await import('@/lib/prompt-registry');
+      const { system, user } = await promptRegistry.render('ai-judge.synthesis', {
+        results: JSON.stringify(results.slice(0, 20), null, 2),
+        scores: JSON.stringify(scores, null, 2)
       });
 
-      const content = response.choices[0].message.content || "{}";
-      return JSON.parse(content);
+      const response = await aiModelService.chatCompletion({
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user }
+        ]
+      });
+
+      // Try to parse JSON from response
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      
+      // If not valid JSON, use heuristics
+      console.warn("[AIJudge] Could not parse AI response as JSON");
+      return this.generateHeuristicSummary({ SECURITY: results }, scores);
     } catch (e) {
-      console.error("[AIJudge] OpenAI call failed, falling back to heuristics:", e);
+      console.error("[AIJudge] AI call failed, falling back to heuristics:", e);
       return this.generateHeuristicSummary({ SECURITY: results }, scores);
     }
   }

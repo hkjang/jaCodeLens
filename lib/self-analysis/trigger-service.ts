@@ -223,6 +223,164 @@ export class TriggerService {
     
     return count > 0;
   }
+  
+  /**
+   * 트리거 취소
+   */
+  async cancelTrigger(triggerId: string): Promise<AnalysisTrigger> {
+    const trigger = await prisma.analysisTrigger.findUnique({
+      where: { id: triggerId }
+    });
+    
+    if (!trigger) {
+      throw new Error(`Trigger not found: ${triggerId}`);
+    }
+    
+    if (trigger.status === 'COMPLETED' || trigger.status === 'FAILED') {
+      throw new Error('Cannot cancel a completed or failed trigger');
+    }
+    
+    // Cancel the analysis execution if it exists
+    if (trigger.executionId) {
+      await this.orchestrator.cancelAnalysis(trigger.executionId);
+    }
+    
+    return prisma.analysisTrigger.update({
+      where: { id: triggerId },
+      data: {
+        status: 'CANCELLED',
+        completedAt: new Date(),
+        errorMessage: 'Cancelled by user'
+      }
+    });
+  }
+  
+  /**
+   * 트리거 상세 조회 (에이전트 실행 정보 포함)
+   */
+  async getTriggerDetails(triggerId: string): Promise<TriggerDetails | null> {
+    const trigger = await prisma.analysisTrigger.findUnique({
+      where: { id: triggerId },
+      include: {
+        selfProject: {
+          include: { project: true }
+        }
+      }
+    });
+    
+    if (!trigger) return null;
+    
+    let agentProgress: AgentProgress[] = [];
+    
+    if (trigger.executionId) {
+      const agentExecutions = await prisma.agentExecution.findMany({
+        where: { executeId: trigger.executionId },
+        include: { tasks: true },
+        orderBy: { createdAt: 'asc' }
+      });
+      
+      agentProgress = agentExecutions.map(ae => ({
+        name: ae.agentName,
+        status: ae.status,
+        durationMs: ae.durationMs,
+        tokensUsed: ae.tokensUsed,
+        modelName: this.getAgentModelName(ae.agentName),
+        modelProvider: this.getAgentModelProvider(ae.agentName),
+        tasksTotal: ae.tasks.length,
+        tasksCompleted: ae.tasks.filter(t => t.status === 'COMPLETED').length
+      }));
+    }
+    
+    const progress = {
+      total: agentProgress.length,
+      completed: agentProgress.filter(a => a.status === 'COMPLETED').length,
+      running: agentProgress.filter(a => a.status === 'RUNNING').length,
+      pending: agentProgress.filter(a => a.status === 'PENDING').length,
+      failed: agentProgress.filter(a => a.status === 'FAILED').length
+    };
+    
+    return {
+      trigger,
+      progress,
+      agents: agentProgress
+    };
+  }
+  
+  /**
+   * 에이전트별 AI 모델 이름 반환 (DB에서 기본 모델 조회)
+   */
+  private async getDefaultModelInfo(): Promise<{ name: string; provider: string }> {
+    const defaultModel = await prisma.aiModel.findFirst({
+      where: { isDefault: true, isActive: true }
+    });
+    
+    if (defaultModel) {
+      return { name: defaultModel.name, provider: defaultModel.provider };
+    }
+    
+    // 기본 모델이 없으면 활성화된 첫 번째 모델 사용
+    const activeModel = await prisma.aiModel.findFirst({
+      where: { isActive: true }
+    });
+    
+    if (activeModel) {
+      return { name: activeModel.name, provider: activeModel.provider };
+    }
+    
+    return { name: 'unknown', provider: 'unknown' };
+  }
+  
+  /**
+   * 에이전트별 AI 모델 이름 반환 (현재 모든 에이전트가 동일한 기본 모델 사용)
+   */
+  private getAgentModelName(agentName: string): string {
+    // 캐시된 기본 모델 이름 반환 (실제 값은 getTriggerDetails에서 비동기로 조회)
+    return this.cachedDefaultModelName || 'qwen3:8b';
+  }
+  
+  /**
+   * 에이전트별 AI 프로바이더 반환
+   */
+  private getAgentModelProvider(agentName: string): string {
+    return this.cachedDefaultModelProvider || 'Ollama';
+  }
+  
+  // 캐시된 기본 모델 정보
+  private cachedDefaultModelName: string = '';
+  private cachedDefaultModelProvider: string = '';
+  
+  /**
+   * 기본 모델 정보 캐시 갱신
+   */
+  async refreshModelCache(): Promise<void> {
+    const info = await this.getDefaultModelInfo();
+    this.cachedDefaultModelName = info.name;
+    this.cachedDefaultModelProvider = info.provider;
+  }
 }
 
 export const triggerService = new TriggerService();
+
+// Type definitions
+export interface AgentProgress {
+  name: string;
+  status: string;
+  durationMs: number | null;
+  tokensUsed: number | null;
+  modelName: string;
+  modelProvider: string;
+  tasksTotal: number;
+  tasksCompleted: number;
+}
+
+export interface TriggerDetails {
+  trigger: any;
+  progress: {
+    total: number;
+    completed: number;
+    running: number;
+    pending: number;
+    failed: number;
+  };
+  agents: AgentProgress[];
+}
