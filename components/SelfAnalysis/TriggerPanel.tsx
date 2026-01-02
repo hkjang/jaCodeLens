@@ -16,6 +16,10 @@ interface AgentProgress {
   modelProvider: string;
   tasksTotal: number;
   tasksCompleted: number;
+  currentFile?: string | null;
+  currentFilePath?: string | null;
+  recentFiles?: string[];
+  taskProgress?: number;
 }
 
 interface TriggerHistoryItem {
@@ -261,29 +265,82 @@ export function TriggerPanel({
                       {runningAgent.modelName} ({runningAgent.modelProvider})
                     </div>
                   </div>
-                  {runningAgent.tokensUsed && (
-                    <div className="text-right">
-                      <div className="flex items-center gap-1">
-                        <Zap className="w-4 h-4" />
-                        <span className="text-lg font-bold">{runningAgent.tokensUsed.toLocaleString()}</span>
+                  <div className="text-right">
+                    {runningAgent.tasksTotal > 0 && (
+                      <div className="text-sm text-white/80">
+                        파일 {runningAgent.tasksCompleted}/{runningAgent.tasksTotal}
                       </div>
-                      <div className="text-sm text-white/60">tokens 사용</div>
-                    </div>
-                  )}
+                    )}
+                    {runningAgent.tokensUsed && runningAgent.tokensUsed > 0 && (
+                      <div className="flex items-center gap-1 text-sm">
+                        <Zap className="w-3.5 h-3.5" />
+                        {runningAgent.tokensUsed.toLocaleString()} tokens
+                      </div>
+                    )}
+                  </div>
                 </div>
+                
+                {/* Current File Being Analyzed */}
+                {runningAgent.currentFile && (
+                  <div className="mt-3 p-2 bg-white/10 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                      <span className="text-sm font-mono truncate">{runningAgent.currentFile}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+            
+            {/* 📂 File Activity Stream */}
+            {runningDetails?.agents && (() => {
+              // Collect all recent files from all agents
+              const allRecentFiles: { file: string; agent: string }[] = [];
+              runningDetails.agents.forEach((a: AgentProgress) => {
+                if (a.currentFile) {
+                  allRecentFiles.push({ file: a.currentFile, agent: a.name.replace('Analysis', '').replace('Agent', '') });
+                }
+                (a.recentFiles || []).forEach((f: string) => {
+                  if (f) allRecentFiles.push({ file: f, agent: a.name.replace('Analysis', '').replace('Agent', '') });
+                });
+              });
+              
+              if (allRecentFiles.length === 0) return null;
+              
+              return (
+                <div className="mb-3 p-3 bg-black/20 rounded-lg">
+                  <div className="text-xs text-white/60 mb-2">📂 최근 분석 파일</div>
+                  <div className="space-y-1 max-h-24 overflow-y-auto scrollbar-thin">
+                    {allRecentFiles.slice(0, 6).map((item, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2 truncate">
+                          {i === 0 && <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />}
+                          {i > 0 && <CheckCircle className="w-3 h-3 text-green-400" />}
+                          <span className="font-mono truncate">{item.file}</span>
+                        </div>
+                        <span className="text-white/50 text-xs ml-2 shrink-0">{item.agent}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
-            {/* Progress Bar */}
+            {/* Progress Bar - Now uses taskPercent for more granular progress */}
             <div className="mb-3">
               <div className="flex justify-between text-sm mb-1.5">
                 <span className="font-medium">전체 진행률</span>
-                <span className="font-bold">{getProgress()}%</span>
+                <span className="font-bold">
+                  {runningDetails?.progress?.taskPercent ?? getProgress()}%
+                  <span className="text-white/60 font-normal ml-2">
+                    ({runningDetails?.progress?.completedTasks || 0}/{runningDetails?.progress?.totalTasks || runningDetails?.progress?.total || 0} 태스크)
+                  </span>
+                </span>
               </div>
               <div className="h-3 bg-white/20 rounded-full overflow-hidden">
                 <div 
                   className="h-full bg-white rounded-full transition-all duration-500 relative"
-                  style={{ width: `${getProgress()}%` }}
+                  style={{ width: `${runningDetails?.progress?.taskPercent ?? getProgress()}%` }}
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent animate-pulse" />
                 </div>

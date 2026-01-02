@@ -281,28 +281,51 @@ export class TriggerService {
     if (trigger.executionId) {
       const agentExecutions = await prisma.agentExecution.findMany({
         where: { executeId: trigger.executionId },
-        include: { tasks: true },
+        include: { tasks: { orderBy: { startedAt: 'desc' } } },
         orderBy: { createdAt: 'asc' }
       });
       
-      agentProgress = agentExecutions.map(ae => ({
-        name: ae.agentName,
-        status: ae.status,
-        durationMs: ae.durationMs,
-        tokensUsed: ae.tokensUsed,
-        modelName: this.getAgentModelName(ae.agentName),
-        modelProvider: this.getAgentModelProvider(ae.agentName),
-        tasksTotal: ae.tasks.length,
-        tasksCompleted: ae.tasks.filter(t => t.status === 'COMPLETED').length
-      }));
+      agentProgress = agentExecutions.map(ae => {
+        // Get current running task (for file being analyzed)
+        const runningTask = ae.tasks.find(t => t.status === 'RUNNING');
+        // Get completed tasks for recent files
+        const completedTasks = ae.tasks.filter(t => t.status === 'COMPLETED');
+        // Get recent file targets (last 5)
+        const recentFiles = completedTasks.slice(0, 5).map(t => t.target || '');
+        
+        return {
+          name: ae.agentName,
+          status: ae.status,
+          durationMs: ae.durationMs,
+          tokensUsed: ae.tokensUsed,
+          modelName: this.getAgentModelName(ae.agentName),
+          modelProvider: this.getAgentModelProvider(ae.agentName),
+          tasksTotal: ae.tasks.length,
+          tasksCompleted: completedTasks.length,
+          currentFile: runningTask?.target?.split('/').pop() || null,
+          currentFilePath: runningTask?.target || null,
+          recentFiles: recentFiles.map(f => f.split('/').pop() || f),
+          taskProgress: ae.tasks.length > 0 
+            ? Math.round((completedTasks.length / ae.tasks.length) * 100)
+            : 0
+        };
+      });
     }
+    
+    // Calculate overall progress more granularly
+    const totalTasks = agentProgress.reduce((s, a) => s + (a.tasksTotal || 1), 0);
+    const completedTasks = agentProgress.reduce((s, a) => s + (a.tasksCompleted || (a.status === 'COMPLETED' ? 1 : 0)), 0);
     
     const progress = {
       total: agentProgress.length,
       completed: agentProgress.filter(a => a.status === 'COMPLETED').length,
       running: agentProgress.filter(a => a.status === 'RUNNING').length,
       pending: agentProgress.filter(a => a.status === 'PENDING').length,
-      failed: agentProgress.filter(a => a.status === 'FAILED').length
+      failed: agentProgress.filter(a => a.status === 'FAILED').length,
+      // Task-level progress
+      totalTasks,
+      completedTasks,
+      taskPercent: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
     };
     
     return {
