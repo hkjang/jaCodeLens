@@ -235,9 +235,9 @@ export function TriggerPanel({
                       <Timer className="w-3.5 h-3.5" />
                       {formatElapsed(elapsedTime)}
                     </span>
-                    {runningDetails?.progress?.estimatedTotalFiles > 0 && (
+                    {runningDetails?.progress && (
                       <span className="flex items-center gap-1 px-2 py-0.5 bg-white/20 rounded-full">
-                        📂 파일 {runningDetails.progress.estimatedFilesCompleted || 0}/{runningDetails.progress.estimatedTotalFiles}
+                        🤖 에이전트 {runningDetails.progress.completed || 0}/{runningDetails.progress.total || 0}
                       </span>
                     )}
                     {runningDetails?.progress?.projectName && (
@@ -363,9 +363,9 @@ export function TriggerPanel({
                 {runningDetails.agents.map(agent => (
                   <div 
                     key={agent.name}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm backdrop-blur ${
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm backdrop-blur transition-all ${
                       agent.status === 'COMPLETED' ? 'bg-green-500/30' :
-                      agent.status === 'RUNNING' ? 'bg-white/30 ring-2 ring-white/50' :
+                      agent.status === 'RUNNING' ? 'bg-white/30 ring-2 ring-white/50 scale-105' :
                       agent.status === 'FAILED' ? 'bg-red-500/30' :
                       'bg-white/10'
                     }`}
@@ -377,6 +377,11 @@ export function TriggerPanel({
                     <span className={agent.status === 'PENDING' ? 'opacity-50' : ''}>
                       {agent.name.replace('Analysis', '').replace('Agent', '')}
                     </span>
+                    {agent.status === 'RUNNING' && (
+                      <span className="flex items-center gap-1 text-xs bg-white/20 px-1.5 py-0.5 rounded-full animate-pulse">
+                        🧠 AI 분석 중
+                      </span>
+                    )}
                     {agent.status === 'COMPLETED' && agent.durationMs && (
                       <span className="text-xs opacity-70">
                         {formatDuration(agent.durationMs)}
@@ -507,6 +512,12 @@ export function TriggerPanel({
                         {trigger.triggeredBy && (
                           <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
                             by {trigger.triggeredBy}
+                          </span>
+                        )}
+                        {/* Show completion info for completed triggers */}
+                        {trigger.status === 'COMPLETED' && trigger.completedAt && (
+                          <span className="text-xs text-green-600 dark:text-green-400 ml-2">
+                            ✓ {Math.round((new Date(trigger.completedAt).getTime() - new Date(trigger.triggeredAt).getTime()) / 1000)}초 완료
                           </span>
                         )}
                       </div>

@@ -16,16 +16,59 @@ model Project {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  analyses    AnalysisExecute[]
-  stats       ProjectStats[]
-  ruleSets    RuleSet[]
-  risks       RiskAssessment[]
-  techDebts   TechDebt[]
-  decisions   DecisionRecord[]
-  selfProject SelfProject?
+  analyses     AnalysisExecute[]
+  stats        ProjectStats[]
+  ruleSets     RuleSet[]
+  risks        RiskAssessment[]
+  techDebts    TechDebt[]
+  decisions    DecisionRecord[]
+  selfProject  SelfProject?
+  codeElements CodeElement[]
+}
+
+// --- Code Intelligence (코드 요소 추출/분석) ---
+
+model CodeElement {
+  id              String   @id @default(uuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  // 파일 정보
+  filePath        String   // 상대 경로 (프로젝트 루트 기준)
+  fileName        String   // 파일명
+  language        String   // TypeScript, JavaScript, Python 등
+  
+  // 코드 요소 정보
+  elementType     String   // CLASS, FUNCTION, METHOD, VARIABLE, INTERFACE, TYPE, COMPONENT
+  name            String   // 요소 이름
+  signature       String?  // 함수/메서드 시그니처
+  lineStart       Int      // 시작 줄
+  lineEnd         Int      // 끝 줄
+  content         String   // 실제 코드 내용 (최대 5000자)
+  
+  // 컨텍스트
+  parentName      String?  // 부모 클래스/함수 이름
+  exportType      String?  // default, named, none
+  isAsync         Boolean  @default(false)
+  isExported      Boolean  @default(false)
+  
+  // AI 분석 결과
+  aiSummary       String?  // AI가 생성한 한글 요약
+  aiAnalysis      String?  // AI 분석 결과 (JSON)
+  analyzedAt      DateTime?
+  
+  // 메타
+  hash            String?  // 내용 해시 (변경 감지용)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([projectId, filePath])
+  @@index([projectId, elementType])
+  @@index([projectId, name])
 }
 
 // --- Self-Analysis (서비스 자기 분석) ---
+
 
 // 기본 프로젝트 (Self-Analysis용)
 model SelfProject {

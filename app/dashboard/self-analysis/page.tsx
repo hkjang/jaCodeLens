@@ -19,7 +19,8 @@ import {
   TagBadge,
   BaselineIndicator,
   TriggerPanel,
-  GrowthHistory
+  GrowthHistory,
+  ResultsPanel
 } from '@/components/SelfAnalysis';
 
 interface SelfProjectData {
@@ -51,6 +52,7 @@ export default function SelfAnalysisPage() {
   const [loading, setLoading] = useState(true);
   const [isTriggering, setIsTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
@@ -292,6 +294,16 @@ export default function SelfAnalysisPage() {
         isTriggering={isTriggering}
         onRefresh={fetchData}
       />
+
+      {/* Analysis Results */}
+      {selectedExecutionId && (
+        <ResultsPanel executionId={selectedExecutionId} />
+      )}
+
+      {/* Show results for latest completed trigger */}
+      {!selectedExecutionId && triggerHistory.length > 0 && triggerHistory[0]?.executionId && triggerHistory[0]?.status === 'COMPLETED' && (
+        <ResultsPanel executionId={triggerHistory[0].executionId} />
+      )}
 
       {/* Growth History */}
       {selfProject.baselines.length > 0 && (

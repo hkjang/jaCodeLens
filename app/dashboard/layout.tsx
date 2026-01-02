@@ -55,11 +55,12 @@ const allMenuItems = {
   'self-baseline': { href: '/dashboard/self-analysis/baseline', icon: <Target className="w-4 h-4" />, label: '기준선' },
   'self-backlog': { href: '/dashboard/self-analysis/backlog', icon: <ListTodo className="w-4 h-4" />, label: '백로그' },
   'self-policy': { href: '/dashboard/self-analysis/policy', icon: <Shield className="w-4 h-4" />, label: '분석 정책' },
+  'code-elements': { href: '/dashboard/code-elements', icon: <Code2 className="w-4 h-4" />, label: '코드 요소' },
 };
 
 const menuSections: Record<string, { title: string; items: string[] }> = {
   analysis: { title: '분석', items: ['dashboard', 'execution', 'results', 'code-issues', 'improvements', 'architecture', 'dependencies', 'risk-heatmap', 'history'] },
-  selfAnalysis: { title: 'Self Analysis', items: ['self-analysis', 'self-baseline', 'self-backlog', 'self-policy'] },
+  selfAnalysis: { title: 'Self Analysis', items: ['self-analysis', 'self-baseline', 'self-backlog', 'self-policy', 'code-elements'] },
   operations: { title: '운영', items: ['operations', 'agents', 'queue', 'resources', 'logs', 'approvals', 'notifications'] },
   admin: { title: '관리', items: ['admin-roles', 'admin-policies', 'admin-agents', 'admin-models', 'admin-audit', 'reports', 'settings'] },
 };

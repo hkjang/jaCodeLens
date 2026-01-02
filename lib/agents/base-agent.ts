@@ -1,10 +1,16 @@
 import { AgentTask } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { aiModelService, ChatMessage } from "@/lib/ai-model-service";
+import { agentConfigService } from "@/lib/agent-config-service";
 
 export interface AnalysisContext {
   projectId: string;
   files: string[]; // List of file paths to analyze
+}
+
+export interface ConfiguredPrompt {
+  systemPrompt: string;
+  userPromptTemplate: string | null;
 }
 
 export abstract class BaseAgent {
@@ -112,6 +118,49 @@ export abstract class BaseAgent {
       return { name: model.name, provider: model.provider };
     }
     return null;
+  }
+
+  /**
+   * Get the configured prompt from Admin settings
+   * Returns the system prompt and user prompt template configured for this agent
+   */
+  protected async getConfiguredPrompt(): Promise<ConfiguredPrompt | null> {
+    console.log(`   📝 Loading prompt for ${this.name}...`);
+    const prompt = await agentConfigService.getAgentPrompt(this.name);
+    if (prompt) {
+      console.log(`   📝 Loaded admin-configured prompt (${prompt.systemPrompt.length} chars)`);
+      return prompt;
+    }
+    console.log(`   ⚠️ No configured prompt found, using defaults`);
+    return null;
+  }
+
+  /**
+   * Call AI using the admin-configured prompt with variable substitution
+   * Variables in template: {{projectName}}, {{files}}, {{content}}, {{context}}
+   */
+  protected async callAIWithConfig(variables: Record<string, string>): Promise<string> {
+    const configuredPrompt = await this.getConfiguredPrompt();
+    
+    if (!configuredPrompt) {
+      throw new Error(`No prompt configured for ${this.name}. Please configure in Admin > Prompts.`);
+    }
+
+    let userPrompt = configuredPrompt.userPromptTemplate || '';
+    
+    // Substitute variables
+    for (const [key, value] of Object.entries(variables)) {
+      userPrompt = userPrompt.replace(new RegExp(`{{${key}}}`, 'g'), value);
+    }
+
+    return this.callAI(configuredPrompt.systemPrompt, userPrompt);
+  }
+
+  /**
+   * Get agent configuration from Admin settings
+   */
+  protected async getAgentConfig() {
+    return agentConfigService.getAgentConfig(this.name);
   }
 
   /**

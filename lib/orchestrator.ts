@@ -39,8 +39,9 @@ export class AgentOrchestrator {
       });
     }
 
-    // Trigger the initial dispatch (in a real system this might be event-driven)
-    // For now, we assume a separate worker or the caller initiates the next step.
+    // Initialize tasks for all agents immediately
+    await this.dispatchPendingAgents(execution.id);
+
     console.log(`Analysis started for project ${project.name} (Execution ID: ${execution.id})`);
     
     return execution;

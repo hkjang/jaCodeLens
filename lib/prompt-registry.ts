@@ -76,7 +76,7 @@ Be concise and professional.`,
     key: 'agent.structure',
     name: '구조 분석 에이전트',
     category: 'AGENT',
-    systemPrompt: 'You are a software architecture expert. Analyze project structure, directory organization, and file patterns to identify architectural issues and improvement opportunities.',
+    systemPrompt: 'You are a software architecture expert. Analyze project structure, directory organization, and file patterns to identify architectural issues and improvement opportunities. Respond only in Korean.',
     userPromptTemplate: `Analyze the following project structure:
 
 {{structure}}
@@ -102,7 +102,7 @@ Respond in JSON format:
     key: 'agent.security',
     name: '보안 분석 에이전트',
     category: 'AGENT',
-    systemPrompt: 'You are a security expert specializing in code vulnerability detection. Analyze code for security issues including SQL injection, XSS, authentication flaws, and sensitive data exposure.',
+    systemPrompt: 'You are a security expert specializing in code vulnerability detection. Analyze code for security issues including SQL injection, XSS, authentication flaws, and sensitive data exposure. Respond only in Korean.',
     userPromptTemplate: `Analyze the following code for security vulnerabilities:
 
 {{code}}
@@ -122,7 +122,7 @@ Respond in JSON format:
     key: 'agent.quality',
     name: '코드 품질 에이전트',
     category: 'AGENT',
-    systemPrompt: 'You are a code quality expert. Analyze code for maintainability, complexity, code smells, and best practices violations.',
+    systemPrompt: 'You are a code quality expert. Analyze code for maintainability, complexity, code smells, and best practices violations. Respond only in Korean.',
     userPromptTemplate: `Analyze the following code for quality issues:
 
 {{code}}
@@ -142,7 +142,7 @@ Respond in JSON format:
     key: 'agent.dependency',
     name: '의존성 분석 에이전트',
     category: 'AGENT',
-    systemPrompt: 'You are a dependency management expert. Analyze project dependencies for security vulnerabilities, outdated packages, license issues, and bloat.',
+    systemPrompt: 'You are a dependency management expert. Analyze project dependencies for security vulnerabilities, outdated packages, license issues, and bloat. Respond only in Korean.',
     userPromptTemplate: `Analyze the following dependencies:
 
 {{dependencies}}
@@ -168,7 +168,7 @@ Respond in JSON format:
     key: 'agent.style',
     name: '스타일 검사 에이전트',
     category: 'AGENT',
-    systemPrompt: 'You are a coding style expert. Analyze code for style consistency, formatting issues, and adherence to style guides.',
+    systemPrompt: 'You are a coding style expert. Analyze code for style consistency, formatting issues, and adherence to style guides. Respond only in Korean.',
     userPromptTemplate: `Analyze the following code for style issues:
 
 {{code}}
@@ -194,7 +194,7 @@ Respond in JSON format:
     key: 'agent.test',
     name: '테스트 분석 에이전트',
     category: 'AGENT',
-    systemPrompt: 'You are a testing expert. Analyze test coverage, test quality, and identify missing or inadequate tests.',
+    systemPrompt: 'You are a testing expert. Analyze test coverage, test quality, and identify missing or inadequate tests. Respond only in Korean.',
     userPromptTemplate: `Analyze the following test file:
 
 {{code}}

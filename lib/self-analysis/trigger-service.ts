@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db';
 import { AnalysisTrigger, SelfProject } from '@prisma/client';
 import { AgentOrchestrator } from '@/lib/orchestrator';
 import { agentConfigService } from '@/lib/agent-config-service';
+import { analysisWorker } from '@/lib/self-analysis/analysis-worker';
 
 /**
  * TriggerService - 분석 트리거 이벤트 처리
@@ -181,8 +182,10 @@ export class TriggerService {
       console.log('');
       console.log(`✅ Analysis dispatched in ${elapsed}ms`);
       console.log(`   Execution ID: ${execution.id}`);
-      console.log('   Agents are now processing in parallel...');
-      console.log('');
+      
+      // 5. 🔧 Actually execute the agents via Worker (async)
+      this.runWorker(execution.id, triggerId);
+      
       
       
     } catch (error) {
@@ -197,6 +200,38 @@ export class TriggerService {
       });
       throw error;
     }
+  }
+  
+  /**
+   * Worker 실행 (비동기 - 백그라운드에서 실행)
+   */
+  private runWorker(executionId: string, triggerId: string): void {
+    // Run asynchronously without blocking the response
+    (async () => {
+      try {
+        await analysisWorker.executeAnalysis(executionId);
+        
+        // Update trigger as completed
+        await prisma.analysisTrigger.update({
+          where: { id: triggerId },
+          data: {
+            status: 'COMPLETED',
+            completedAt: new Date()
+          }
+        });
+        console.log(`✅ Trigger ${triggerId} completed`);
+      } catch (error) {
+        console.error(`❌ Trigger ${triggerId} failed:`, error);
+        await prisma.analysisTrigger.update({
+          where: { id: triggerId },
+          data: {
+            status: 'FAILED',
+            completedAt: new Date(),
+            errorMessage: error instanceof Error ? error.message : String(error)
+          }
+        });
+      }
+    })();
   }
   
   /**
@@ -354,30 +389,21 @@ export class TriggerService {
       estimatedFileCount = 50; // Fallback
     }
     
-    // Calculate simulated file progress based on elapsed time and agent status
+    // Calculate real progress based on completed agents (not simulated)
     const completedAgents = agentProgress.filter(a => a.status === 'COMPLETED').length;
     const runningAgents = agentProgress.filter(a => a.status === 'RUNNING').length;
     const totalAgents = agentProgress.length;
     
-    // Estimate: each agent processes ~= total_files files
-    // Completed agents = their file portion complete
-    // Running agent = partially complete based on simulated time
+    // Calculate elapsed time
     const elapsedMs = trigger.triggeredAt 
       ? Date.now() - new Date(trigger.triggeredAt).getTime() 
       : 0;
     
-    // Simulate file progress for running agents (assume 2 files/second average)
-    const filesPerAgent = Math.ceil(estimatedFileCount / Math.max(totalAgents, 1));
-    const simulatedFilesInProgress = Math.min(
-      Math.floor(elapsedMs / 500) % filesPerAgent, // Reset every agent
-      filesPerAgent
-    );
-    
-    const estimatedFilesCompleted = (completedAgents * filesPerAgent) + 
-      (runningAgents > 0 ? simulatedFilesInProgress : 0);
+    // Real progress based on agents completed
+    const agentPercent = totalAgents > 0 ? Math.round((completedAgents / totalAgents) * 100) : 0;
     
     const progress = {
-      total: agentProgress.length,
+      total: totalAgents,
       completed: completedAgents,
       running: runningAgents,
       pending: agentProgress.filter(a => a.status === 'PENDING').length,
@@ -386,12 +412,9 @@ export class TriggerService {
       totalTasks,
       completedTasks,
       taskPercent: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
-      // File-level estimate for UI
-      estimatedTotalFiles: estimatedFileCount,
-      estimatedFilesCompleted: Math.min(estimatedFilesCompleted, estimatedFileCount),
-      filePercent: estimatedFileCount > 0 
-        ? Math.round((estimatedFilesCompleted / estimatedFileCount) * 100)
-        : 0,
+      // Agent-level progress (real, not simulated)
+      agentPercent,
+      elapsedMs,
       projectName
     };
     
