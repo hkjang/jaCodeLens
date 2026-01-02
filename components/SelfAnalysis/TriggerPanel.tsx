@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Play, Clock, GitBranch, GitMerge, Package, Calendar, User, 
   CheckCircle, XCircle, Loader2, Square, ChevronDown, ChevronUp,
-  Cpu, Zap
+  Cpu, Zap, Activity, Timer, AlertCircle, TrendingUp
 } from 'lucide-react';
 
 interface AgentProgress {
@@ -43,9 +43,6 @@ interface TriggerPanelProps {
   onRefresh?: () => void;
 }
 
-/**
- * 분석 트리거 관리 패널 (중지 기능 및 진행 상황 표시 포함)
- */
 export function TriggerPanel({ 
   triggers, 
   history, 
@@ -57,6 +54,12 @@ export function TriggerPanel({
   const [expandedTriggerId, setExpandedTriggerId] = useState<string | null>(null);
   const [triggerDetails, setTriggerDetails] = useState<Record<string, { progress: any; agents: AgentProgress[] }>>({});
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [elapsedTime, setElapsedTime] = useState(0);
+
+  // Get currently running trigger
+  const runningTrigger = history.find(t => t.status === 'RUNNING' || t.status === 'PENDING');
+  const runningDetails = runningTrigger ? triggerDetails[runningTrigger.id] : null;
+  const runningAgent = runningDetails?.agents.find(a => a.status === 'RUNNING');
 
   const triggerTypes = [
     { key: 'push', label: 'Git Push', icon: GitBranch },
@@ -66,6 +69,13 @@ export function TriggerPanel({
     { key: 'schedule', label: '일일 스케줄', icon: Calendar }
   ];
 
+  // Auto-expand running trigger
+  useEffect(() => {
+    if (runningTrigger && !expandedTriggerId) {
+      setExpandedTriggerId(runningTrigger.id);
+    }
+  }, [runningTrigger?.id]);
+
   // Fetch trigger details when expanded
   useEffect(() => {
     if (expandedTriggerId && !triggerDetails[expandedTriggerId]) {
@@ -73,20 +83,19 @@ export function TriggerPanel({
     }
   }, [expandedTriggerId]);
 
-  // Auto-refresh running triggers
+  // Auto-refresh running triggers + elapsed time
   useEffect(() => {
-    const runningTriggers = history.filter(t => t.status === 'RUNNING' || t.status === 'PENDING');
-    if (runningTriggers.length > 0) {
+    if (runningTrigger) {
       const interval = setInterval(() => {
-        runningTriggers.forEach(t => {
-          if (expandedTriggerId === t.id) {
-            fetchTriggerDetails(t.id);
-          }
-        });
-      }, 2000);
+        fetchTriggerDetails(runningTrigger.id);
+        const started = new Date(runningTrigger.triggeredAt).getTime();
+        setElapsedTime(Math.floor((Date.now() - started) / 1000));
+      }, 1500);
       return () => clearInterval(interval);
+    } else {
+      setElapsedTime(0);
     }
-  }, [history, expandedTriggerId]);
+  }, [runningTrigger?.id]);
 
   const fetchTriggerDetails = async (triggerId: string) => {
     try {
@@ -148,60 +157,195 @@ export function TriggerPanel({
     };
     const Icon = icons[status] || Clock;
 
+    const labels: Record<string, string> = {
+      'PENDING': '대기 중',
+      'RUNNING': '실행 중',
+      'COMPLETED': '완료',
+      'FAILED': '실패',
+      'CANCELLED': '취소됨'
+    };
+
     return (
-      <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded ${styles[status] || 'bg-gray-100 text-gray-600'}`}>
+      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || ''}`}>
         <Icon className={`w-3 h-3 ${status === 'RUNNING' ? 'animate-spin' : ''}`} />
-        {status}
+        {labels[status] || status}
       </span>
     );
   };
 
   const getAgentStatusIcon = (status: string) => {
-    switch (status) {
-      case 'COMPLETED': return <CheckCircle className="w-4 h-4 text-green-500" />;
-      case 'RUNNING': return <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />;
-      case 'FAILED': return <XCircle className="w-4 h-4 text-red-500" />;
-      case 'CANCELLED': return <Square className="w-4 h-4 text-gray-400" />;
-      default: return <Clock className="w-4 h-4 text-gray-400" />;
-    }
+    if (status === 'RUNNING') return <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />;
+    if (status === 'COMPLETED') return <CheckCircle className="w-4 h-4 text-green-500" />;
+    if (status === 'FAILED') return <XCircle className="w-4 h-4 text-red-500" />;
+    return <Clock className="w-4 h-4 text-gray-400" />;
   };
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleString('ko-KR', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+  const formatDate = (date: string) => {
+    const d = new Date(date);
+    return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
   const formatDuration = (ms: number | null) => {
     if (!ms) return '-';
-    if (ms < 1000) return `${ms}ms`;
-    return `${(ms / 1000).toFixed(1)}s`;
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return `${seconds}초`;
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}분 ${seconds % 60}초`;
+  };
+
+  const formatElapsed = (seconds: number) => {
+    if (seconds < 60) return `${seconds}초`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}분 ${s}초`;
+  };
+
+  // Get progress percentage
+  const getProgress = () => {
+    if (!runningDetails?.progress) return 0;
+    if (runningDetails.progress.total === 0) return 0;
+    return Math.round((runningDetails.progress.completed / runningDetails.progress.total) * 100);
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* 🔥 LIVE PROGRESS BANNER - Shows when analysis is running */}
+      {runningTrigger && (
+        <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 rounded-xl p-5 text-white shadow-lg">
+          {/* Animated background */}
+          <div className="absolute inset-0 opacity-20">
+            <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.1)_50%,transparent_75%)] bg-[length:250%_250%] animate-[shimmer_3s_linear_infinite]" />
+          </div>
+          
+          <div className="relative">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-10 h-10 bg-white/20 backdrop-blur rounded-full">
+                  <Activity className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg">분석 진행 중</h3>
+                  <div className="flex items-center gap-2 text-white/80 text-sm">
+                    <Timer className="w-3.5 h-3.5" />
+                    <span>경과 시간: {formatElapsed(elapsedTime)}</span>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => handleCancel(runningTrigger.id)}
+                disabled={cancellingId === runningTrigger.id}
+                className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg font-medium transition disabled:opacity-50"
+              >
+                {cancellingId === runningTrigger.id ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Square className="w-4 h-4" />
+                )}
+                중지
+              </button>
+            </div>
+
+            {/* Current Agent Highlight */}
+            {runningAgent && (
+              <div className="mb-4 p-3 bg-white/10 backdrop-blur rounded-lg">
+                <div className="flex items-center gap-2 text-sm text-white/70 mb-1">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  현재 실행 중:
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xl font-bold">{runningAgent.name.replace('Agent', '').replace('Analysis', ' 분석')}</span>
+                    <div className="flex items-center gap-2 text-sm text-white/70 mt-0.5">
+                      <Cpu className="w-3.5 h-3.5" />
+                      {runningAgent.modelName} ({runningAgent.modelProvider})
+                    </div>
+                  </div>
+                  {runningAgent.tokensUsed && (
+                    <div className="text-right">
+                      <div className="flex items-center gap-1">
+                        <Zap className="w-4 h-4" />
+                        <span className="text-lg font-bold">{runningAgent.tokensUsed.toLocaleString()}</span>
+                      </div>
+                      <div className="text-sm text-white/60">tokens 사용</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Progress Bar */}
+            <div className="mb-3">
+              <div className="flex justify-between text-sm mb-1.5">
+                <span className="font-medium">전체 진행률</span>
+                <span className="font-bold">{getProgress()}%</span>
+              </div>
+              <div className="h-3 bg-white/20 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-white rounded-full transition-all duration-500 relative"
+                  style={{ width: `${getProgress()}%` }}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent animate-pulse" />
+                </div>
+              </div>
+            </div>
+
+            {/* Agent Status Pills */}
+            {runningDetails?.agents && (
+              <div className="flex flex-wrap gap-2">
+                {runningDetails.agents.map(agent => (
+                  <div 
+                    key={agent.name}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm backdrop-blur ${
+                      agent.status === 'COMPLETED' ? 'bg-green-500/30' :
+                      agent.status === 'RUNNING' ? 'bg-white/30 ring-2 ring-white/50' :
+                      agent.status === 'FAILED' ? 'bg-red-500/30' :
+                      'bg-white/10'
+                    }`}
+                  >
+                    {agent.status === 'RUNNING' && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {agent.status === 'COMPLETED' && <CheckCircle className="w-3 h-3" />}
+                    {agent.status === 'FAILED' && <XCircle className="w-3 h-3" />}
+                    {agent.status === 'PENDING' && <Clock className="w-3 h-3 opacity-50" />}
+                    <span className={agent.status === 'PENDING' ? 'opacity-50' : ''}>
+                      {agent.name.replace('Analysis', '').replace('Agent', '')}
+                    </span>
+                    {agent.status === 'COMPLETED' && agent.durationMs && (
+                      <span className="text-xs opacity-70">
+                        {formatDuration(agent.durationMs)}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Manual Trigger Button */}
-      <div className="bg-gradient-to-r from-blue-500 to-cyan-500 rounded-xl p-6 text-white">
+      <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 rounded-xl border border-blue-200 dark:border-blue-800 p-6">
         <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold">수동 분석 실행</h3>
-            <p className="text-blue-100 text-sm mt-1">
-              지금 바로 Self-Analysis를 실행합니다
-            </p>
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg">
+              <Play className="w-7 h-7 text-white" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">수동 분석 실행</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                전체 프로젝트에 대해 즉시 분석을 실행합니다
+              </p>
+            </div>
           </div>
           <button
             onClick={onManualTrigger}
-            disabled={isTriggering}
-            className="flex items-center gap-2 px-4 py-2 bg-white text-blue-600 font-medium rounded-lg hover:bg-blue-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isTriggering || !!runningTrigger}
+            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-semibold hover:from-blue-600 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-lg hover:shadow-xl"
           >
-            {isTriggering ? (
+            {isTriggering || runningTrigger ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                분석 중...
+                {runningTrigger ? '분석 중...' : '시작 중...'}
               </>
             ) : (
               <>
@@ -251,24 +395,31 @@ export function TriggerPanel({
       {/* Trigger History with Progress */}
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-          최근 트리거 히스토리
+          분석 히스토리
         </h3>
         
         {history.length === 0 ? (
-          <p className="text-gray-500 dark:text-gray-400 text-center py-8">
-            아직 트리거 히스토리가 없습니다
-          </p>
+          <div className="text-center py-10">
+            <TrendingUp className="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+            <p className="text-gray-500 dark:text-gray-400">아직 분석 히스토리가 없습니다</p>
+            <p className="text-sm text-gray-400 dark:text-gray-500">분석을 시작하면 여기에 기록됩니다</p>
+          </div>
         ) : (
           <div className="space-y-3">
             {history.slice(0, 10).map(trigger => {
               const isExpanded = expandedTriggerId === trigger.id;
               const details = triggerDetails[trigger.id];
               const canCancel = trigger.status === 'RUNNING' || trigger.status === 'PENDING';
+              const isRunning = trigger.status === 'RUNNING';
               
               return (
                 <div
                   key={trigger.id}
-                  className="bg-gray-50 dark:bg-gray-700/50 rounded-lg overflow-hidden"
+                  className={`rounded-lg overflow-hidden transition ${
+                    isRunning 
+                      ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800' 
+                      : 'bg-gray-50 dark:bg-gray-700/50'
+                  }`}
                 >
                   {/* Trigger Header */}
                   <div className="flex items-center justify-between p-3">
@@ -320,7 +471,7 @@ export function TriggerPanel({
 
                   {/* Expanded Agent Details */}
                   {isExpanded && (
-                    <div className="border-t border-gray-200 dark:border-gray-600 p-4 bg-gray-100 dark:bg-gray-800">
+                    <div className="border-t border-gray-200 dark:border-gray-600 p-4 bg-white dark:bg-gray-800">
                       {!details ? (
                         <div className="flex items-center justify-center py-4 text-gray-500">
                           <Loader2 className="w-4 h-4 animate-spin mr-2" />
@@ -349,12 +500,18 @@ export function TriggerPanel({
                             {details.agents.map((agent: AgentProgress) => (
                               <div 
                                 key={agent.name}
-                                className="flex items-center justify-between p-2 bg-white dark:bg-gray-700 rounded-lg"
+                                className={`flex items-center justify-between p-3 rounded-lg transition ${
+                                  agent.status === 'RUNNING' 
+                                    ? 'bg-blue-50 dark:bg-blue-900/20 ring-1 ring-blue-200 dark:ring-blue-800' 
+                                    : 'bg-gray-50 dark:bg-gray-700/50'
+                                }`}
                               >
                                 <div className="flex items-center gap-3">
                                   {getAgentStatusIcon(agent.status)}
                                   <div>
-                                    <span className="text-sm font-medium text-gray-900 dark:text-white">
+                                    <span className={`text-sm font-medium ${
+                                      agent.status === 'RUNNING' ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-white'
+                                    }`}>
                                       {agent.name.replace('Agent', '')}
                                     </span>
                                     <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -372,7 +529,7 @@ export function TriggerPanel({
                                   {agent.tokensUsed && (
                                     <div className="flex items-center gap-1">
                                       <Zap className="w-3 h-3" />
-                                      {agent.tokensUsed} tokens
+                                      {agent.tokensUsed.toLocaleString()} tokens
                                     </div>
                                   )}
                                 </div>
