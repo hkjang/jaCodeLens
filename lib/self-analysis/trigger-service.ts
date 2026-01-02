@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db';
 import { AnalysisTrigger, SelfProject } from '@prisma/client';
 import { AgentOrchestrator } from '@/lib/orchestrator';
+import { agentConfigService } from '@/lib/agent-config-service';
 
 /**
  * TriggerService - 분석 트리거 이벤트 처리
@@ -11,18 +12,17 @@ import { AgentOrchestrator } from '@/lib/orchestrator';
 export class TriggerService {
   private orchestrator: AgentOrchestrator;
   
-  // 분석에 사용할 기본 에이전트 목록
-  private readonly defaultAgents = [
-    'StructureAnalysisAgent',
-    'QualityAnalysisAgent',
-    'SecurityAnalysisAgent',
-    'DependencyAnalysisAgent',
-    'StyleAnalysisAgent',
-    'TestAnalysisAgent'
-  ];
-  
   constructor() {
     this.orchestrator = new AgentOrchestrator();
+  }
+  
+  /**
+   * 활성화된 에이전트 목록 조회 (Admin에서 설정)
+   */
+  private async getActiveAgentNames(): Promise<string[]> {
+    const agents = await agentConfigService.getActiveAgentNames();
+    console.log(`[TriggerService] Active agents from config: ${agents.join(', ')}`);
+    return agents;
   }
   
   /**
@@ -146,16 +146,22 @@ export class TriggerService {
         data: { status: 'RUNNING' }
       });
       
-      // 2. 분석 실행 시작
-      const execution = await this.orchestrator.startAnalysis(projectId, this.defaultAgents);
+      // 2. 활성 에이전트 목록 조회 (Admin에서 설정)
+      const activeAgents = await this.getActiveAgentNames();
+      if (activeAgents.length === 0) {
+        throw new Error('No active agents configured. Please enable agents in Admin > Agents.');
+      }
       
-      // 3. 트리거에 실행 ID 연결
+      // 3. 분석 실행 시작
+      const execution = await this.orchestrator.startAnalysis(projectId, activeAgents);
+      
+      // 4. 트리거에 실행 ID 연결
       await prisma.analysisTrigger.update({
         where: { id: triggerId },
         data: { executionId: execution.id }
       });
       
-      console.log(`[Trigger] Analysis started: ${execution.id}`);
+      console.log(`[Trigger] Analysis started: ${execution.id} with agents: ${activeAgents.join(', ')}`);
       
     } catch (error) {
       // 에러 발생 시 트리거 실패 처리
