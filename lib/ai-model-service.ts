@@ -124,7 +124,10 @@ export class AiModelService {
     const data = await response.json();
     
     console.log(`[AiModelService] Ollama raw response keys:`, Object.keys(data));
-    
+    console.log(`[AiModelService] Ollama message object:`, JSON.stringify(data.message, null, 2));
+    console.log(`[AiModelService] Ollama message content type:`, typeof data.message?.content);
+    console.log(`[AiModelService] Ollama message content length:`, data.message?.content?.length || 0);
+
     // 사용량 업데이트
     await this.updateUsage(model.id, data.eval_count || 0);
 

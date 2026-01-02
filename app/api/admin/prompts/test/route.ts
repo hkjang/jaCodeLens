@@ -56,9 +56,9 @@ export async function POST(request: NextRequest) {
       aiResponse = await aiModelService.chatCompletion({
         messages: [
           { role: 'system', content: prompt.systemPrompt },
-          { role: 'user', content: userPrompt.slice(0, 500) + '...[truncated for test]' }
+          { role: 'user', content: userPrompt.slice(0, 1000) + (userPrompt.length > 1000 ? '...[truncated for test]' : '') }
         ],
-        maxTokens: 500
+        maxTokens: 12800  // Increased for more complete responses
       });
     } catch (aiError: any) {
       return NextResponse.json({
@@ -76,10 +76,11 @@ export async function POST(request: NextRequest) {
     const validations: { check: string; passed: boolean; message: string }[] = [];
     
     // Check if response exists
+    const hasResponse = !!aiResponse && aiResponse.length > 0;
     validations.push({
       check: '응답 생성',
-      passed: !!aiResponse && aiResponse.length > 0,
-      message: aiResponse ? `${aiResponse.length}자 응답 생성됨` : '응답이 비어있습니다'
+      passed: hasResponse,
+      message: hasResponse ? `${aiResponse.length}자 응답 생성됨` : '응답이 비어있습니다'
     });
     
     // Check JSON format if expected

@@ -474,3 +474,30 @@ model AgentConfig {
   updatedAt    DateTime @updatedAt
 }
 
+// --- Admin: Role Management ---
+model AdminRole {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  permissions String   @default("[]")  // JSON array of permission keys
+  userCount   Int      @default(0)
+  isSystem    Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// --- Admin: Analysis Policy ---
+model AdminPolicy {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  category    String   @default("other")  // Security, Quality, Architecture, etc
+  isActive    Boolean  @default(true)
+  rules       String   @default("[]")     // JSON array of rules
+  priority    Int      @default(0)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
