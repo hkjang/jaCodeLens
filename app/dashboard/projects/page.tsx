@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { 
   Plus, FolderGit2, GitBranch, Clock, CheckCircle, 
   AlertTriangle, PlayCircle, Settings, Trash2, RefreshCw,
-  ChevronRight, Search, Filter
+  ChevronRight, Search, Filter, Shield, BarChart3, Activity,
+  ArrowUp, ArrowDown, Minus, Zap, ExternalLink
 } from 'lucide-react';
 
 interface Project {
@@ -20,6 +21,8 @@ interface Project {
     status: string;
     date: string;
     issueCount: number;
+    criticalCount?: number;
+    scoreChange?: number;
   } | null;
 }
 
@@ -47,7 +50,9 @@ export default function ProjectsPage() {
     }
   }
 
-  async function startAnalysis(projectId: string) {
+  async function startAnalysis(projectId: string, e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
     setSelectedProject(projectId);
     try {
       const res = await fetch('/api/analysis/start', {
@@ -136,9 +141,10 @@ export default function ProjectsPage() {
       {filteredProjects.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredProjects.map((project) => (
-            <div 
+            <Link 
               key={project.id}
-              className="group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden hover:shadow-lg transition-all"
+              href={`/dashboard/projects/${project.id}`}
+              className="group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-600 transition-all"
             >
               {/* Project Header */}
               <div className="p-5 border-b border-gray-100 dark:border-gray-700">
@@ -153,7 +159,7 @@ export default function ProjectsPage() {
                       <FolderGit2 className="w-5 h-5" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-gray-900 dark:text-white">{project.name}</h3>
+                      <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{project.name}</h3>
                       <p className="text-xs text-gray-500 truncate max-w-[180px]">{project.path}</p>
                     </div>
                   </div>
@@ -170,35 +176,73 @@ export default function ProjectsPage() {
                 )}
               </div>
 
-              {/* Last Analysis Info */}
+              {/* Health Indicators */}
               <div className="p-4 bg-gray-50 dark:bg-gray-800/50">
                 {project.lastAnalysis ? (
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-sm">
-                      {project.lastAnalysis.status === 'COMPLETED' ? (
-                        <CheckCircle className="w-4 h-4 text-green-500" />
-                      ) : project.lastAnalysis.status === 'FAILED' ? (
-                        <AlertTriangle className="w-4 h-4 text-red-500" />
-                      ) : (
-                        <Clock className="w-4 h-4 text-gray-400" />
-                      )}
-                      <span className="text-gray-600 dark:text-gray-400">
-                        {new Date(project.lastAnalysis.date).toLocaleDateString('ko-KR')}
-                      </span>
-                      {project.lastAnalysis.issueCount > 0 && (
-                        <span className="text-gray-500">
-                          · {project.lastAnalysis.issueCount}개 이슈
+                  <div className="space-y-3">
+                    {/* Score with Change Indicator */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm">
+                        {project.lastAnalysis.status === 'COMPLETED' ? (
+                          <CheckCircle className="w-4 h-4 text-green-500" />
+                        ) : project.lastAnalysis.status === 'FAILED' ? (
+                          <AlertTriangle className="w-4 h-4 text-red-500" />
+                        ) : (
+                          <Clock className="w-4 h-4 text-gray-400" />
+                        )}
+                        <span className="text-gray-600 dark:text-gray-400">
+                          {new Date(project.lastAnalysis.date).toLocaleDateString('ko-KR')}
                         </span>
-                      )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {project.lastAnalysis.scoreChange !== undefined && project.lastAnalysis.scoreChange !== 0 && (
+                          <span className={`flex items-center text-xs ${
+                            project.lastAnalysis.scoreChange > 0 ? 'text-green-500' : 'text-red-500'
+                          }`}>
+                            {project.lastAnalysis.scoreChange > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                            {Math.abs(project.lastAnalysis.scoreChange)}%
+                          </span>
+                        )}
+                        {project.lastAnalysis.score !== null && (
+                          <span className={`text-xl font-bold ${
+                            project.lastAnalysis.score >= 80 ? 'text-green-500' :
+                            project.lastAnalysis.score >= 60 ? 'text-yellow-500' :
+                            'text-red-500'
+                          }`}>
+                            {project.lastAnalysis.score}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    {project.lastAnalysis.score !== null && (
-                      <span className={`text-lg font-bold ${
-                        project.lastAnalysis.score >= 80 ? 'text-green-500' :
-                        project.lastAnalysis.score >= 60 ? 'text-yellow-500' :
-                        'text-red-500'
-                      }`}>
-                        {project.lastAnalysis.score}
-                      </span>
+
+                    {/* Risk Mini Indicators */}
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1.5">
+                        <Shield className="w-3.5 h-3.5 text-red-500" />
+                        <div className="w-12 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                          <div className="h-full bg-red-500 rounded-full" style={{ width: '30%' }} />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <BarChart3 className="w-3.5 h-3.5 text-blue-500" />
+                        <div className="w-12 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                          <div className="h-full bg-blue-500 rounded-full" style={{ width: '60%' }} />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Activity className="w-3.5 h-3.5 text-green-500" />
+                        <div className="w-12 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                          <div className="h-full bg-green-500 rounded-full" style={{ width: '80%' }} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Critical Issues Alert */}
+                    {project.lastAnalysis.criticalCount && project.lastAnalysis.criticalCount > 0 && (
+                      <div className="flex items-center gap-2 px-2 py-1 bg-red-50 dark:bg-red-900/20 rounded text-xs text-red-600 dark:text-red-400">
+                        <Zap className="w-3 h-3" />
+                        {project.lastAnalysis.criticalCount}건 즉시 조치 필요
+                      </div>
                     )}
                   </div>
                 ) : (
@@ -209,7 +253,7 @@ export default function ProjectsPage() {
               {/* Actions */}
               <div className="p-4 flex items-center justify-between border-t border-gray-100 dark:border-gray-700">
                 <button
-                  onClick={() => startAnalysis(project.id)}
+                  onClick={(e) => startAnalysis(project.id, e)}
                   disabled={selectedProject === project.id}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm rounded-lg transition-colors"
                 >
@@ -220,13 +264,12 @@ export default function ProjectsPage() {
                   )}
                   분석 시작
                 </button>
-                <div className="flex items-center gap-2">
-                  <button className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                    <Settings className="w-4 h-4" />
-                  </button>
+                <div className="flex items-center gap-2 text-gray-400">
+                  <span className="text-xs">상세 보기</span>
+                  <ExternalLink className="w-4 h-4 group-hover:text-blue-500 transition-colors" />
                 </div>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       )}

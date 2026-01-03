@@ -26,6 +26,7 @@ import {
   ListTodo
 } from 'lucide-react';
 import { useRole, UserRole, roleConfigs } from '@/lib/contexts/RoleContext';
+import QuickActions from '@/components/QuickActions';
 
 const allMenuItems = {
   projects: { href: '/dashboard/projects', icon: <LayoutDashboard className="w-4 h-4" />, label: '프로젝트' },
@@ -169,6 +170,11 @@ export default function DashboardLayout({
       <main className="flex-1 overflow-auto p-8">
         {children}
       </main>
+
+      {/* Quick Actions FAB */}
+      <QuickActions />
     </div>
   );
 }
+
+// Import QuickActions at the top of the file
