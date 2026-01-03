@@ -7,12 +7,22 @@
 // Types
 export * from './types';
 
+// Source Collection (GitHub, GitLab, Bitbucket)
+export { 
+  SourceSync, 
+  createSourceSync,
+  createGitHubSync,
+  createGitLabSync,
+  createBitbucketSync
+} from './source/sync';
+
 // Language Detection
 export { LanguageDetector } from './language/detector';
 export { LanguageRegistry } from './language/registry';
 
 // AST Parsing
 export { TypeScriptParser } from './ast/typescript-parser';
+export { JavaParser } from './ast/java-parser';
 export { ASTCache } from './ast/cache';
 
 // Static Analysis
@@ -38,3 +48,4 @@ export { SecurityAdvisor } from './ai/security-advisor';
 
 // Orchestrator
 export { PipelineOrchestrator, runPipeline } from './orchestrator';
+

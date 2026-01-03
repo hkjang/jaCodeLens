@@ -20,6 +20,7 @@ import {
 } from './types';
 import { LanguageDetector } from './language/detector';
 import { TypeScriptParser } from './ast/typescript-parser';
+import { JavaParser } from './ast/java-parser';
 import { ASTCache } from './ast/cache';
 import { ComplexityAnalyzer } from './static/complexity-analyzer';
 import { StructureAnalyzer } from './static/structure-analyzer';
@@ -56,10 +57,14 @@ const DEFAULT_CONFIG: PipelineConfig = {
 export class PipelineOrchestrator {
   private config: PipelineConfig;
   private astCache: ASTCache;
+  private tsParser: TypeScriptParser;
+  private javaParser: JavaParser;
 
   constructor(config?: Partial<PipelineConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.astCache = new ASTCache();
+    this.tsParser = new TypeScriptParser(this.astCache);
+    this.javaParser = new JavaParser(this.astCache);
   }
 
   /**
@@ -119,19 +124,23 @@ export class PipelineOrchestrator {
         onProgress
       );
 
-      // Stage 3: AST 파싱
+      // Stage 3: AST 파싱 (TypeScript/JavaScript/Java 지원)
       await this.executeStage(
         PipelineStage.AST_PARSE,
         'AST 생성',
         async () => {
-          const parser = new TypeScriptParser(this.astCache);
-          
           for (const file of context.files) {
             const mapping = context.languageMappings.find(m => m.filePath === file.path);
             if (!mapping || !file.content) continue;
             
+            // TypeScript/JavaScript
             if (mapping.language === 'typescript' || mapping.language === 'javascript') {
-              const astFile = parser.parseFile(file.path, file.content, mapping.language);
+              const astFile = this.tsParser.parseFile(file.path, file.content, mapping.language);
+              context.astFiles.push(astFile);
+            }
+            // Java
+            else if (mapping.language === 'java') {
+              const astFile = this.javaParser.parseFile(file.path, file.content);
               context.astFiles.push(astFile);
             }
           }

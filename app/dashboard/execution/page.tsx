@@ -1,10 +1,21 @@
 import { Suspense } from 'react';
 import prisma from '@/lib/db';
-import { Activity, Clock, CheckCircle, XCircle, PlayCircle, AlertTriangle } from 'lucide-react';
-import { AnalysisExecutionView } from '@/components/Analysis';
-import { ParallelAgentLanes } from '@/components/Analysis';
+import { Activity, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { AnalysisExecutionView, ParallelAgentLanes, PipelineStagesView } from '@/components/Analysis';
 
 export const dynamic = 'force-dynamic';
+
+// 8단계 파이프라인 스테이지 정의
+const PIPELINE_STAGES = [
+  'SOURCE_COLLECT',
+  'LANGUAGE_DETECT', 
+  'AST_PARSE',
+  'STATIC_ANALYZE',
+  'RULE_PARSE',
+  'CATEGORIZE',
+  'NORMALIZE',
+  'AI_ENHANCE'
+];
 
 async function getExecutions() {
   try {
@@ -16,11 +27,41 @@ async function getExecutions() {
       }
     });
 
-    // Return with empty agent executions - will be populated in real implementation
-    return executions.map(exec => ({
-      ...exec,
-      agentExecutions: [] as any[]
-    }));
+    // 각 실행에 대한 파이프라인 스테이지 정보 조회
+    const executionsWithStages = await Promise.all(
+      executions.map(async (exec) => {
+        // 파이프라인 스테이지 조회
+        const pipelineStages = await prisma.pipelineStageExecution.findMany({
+          where: { executeId: exec.id }
+        });
+
+        // 정규화된 결과 카운트
+        const resultCount = await prisma.normalizedAnalysisResult.count({
+          where: { executeId: exec.id }
+        });
+
+        return {
+          ...exec,
+          pipelineStages: pipelineStages.map(s => ({
+            stage: s.stage,
+            name: s.stage,
+            description: s.message || '',
+            status: s.status as any,
+            progress: s.progress,
+            message: s.message,
+            error: s.error || undefined,
+            duration: s.startedAt && s.completedAt 
+              ? new Date(s.completedAt).getTime() - new Date(s.startedAt).getTime()
+              : undefined,
+            icon: () => null // Placeholder, actual icon handled in component
+          })),
+          resultCount,
+          agentExecutions: [] as any[]
+        };
+      })
+    );
+
+    return executionsWithStages;
   } catch (e) {
     console.error("DB Error", e);
     return [];
@@ -28,19 +69,22 @@ async function getExecutions() {
 }
 
 function ExecutionCard({ execution }: { execution: any }) {
-  const progress = execution.agentExecutions.length > 0
-    ? (execution.agentExecutions.filter((a: any) => a.status === 'COMPLETED').length / execution.agentExecutions.length) * 100
-    : 0;
+  const hasStages = execution.pipelineStages && execution.pipelineStages.length > 0;
+  
+  // 기존 4단계 스텝 (파이프라인이 없을 때 폴백)
+  const legacySteps = [
+    { id: '1', name: '프로젝트 스캔', status: 'completed' as const },
+    { id: '2', name: '파일 분석', status: execution.status === 'RUNNING' ? 'running' as const : execution.status === 'COMPLETED' ? 'completed' as const : 'pending' as const },
+    { id: '3', name: '에이전트 실행', status: execution.status === 'RUNNING' ? 'running' as const : execution.status === 'COMPLETED' ? 'completed' as const : 'pending' as const },
+    { id: '4', name: '결과 통합', status: execution.status === 'COMPLETED' ? 'completed' as const : 'pending' as const }
+  ];
 
-  const agents = execution.agentExecutions.map((ae: any) => ({
-    id: ae.id,
-    name: ae.agentName,
-    status: ae.status.toLowerCase(),
-    startedAt: ae.createdAt,
-    completedAt: ae.completedAt,
-    taskCount: ae.tasks.length,
-    completedTaskCount: ae.tasks.filter((t: any) => t.status === 'COMPLETED').length
-  }));
+  // 진행률 계산
+  const progress = hasStages
+    ? (execution.pipelineStages.filter((s: any) => s.status === 'completed').length / PIPELINE_STAGES.length) * 100
+    : execution.agentExecutions.length > 0
+      ? (execution.agentExecutions.filter((a: any) => a.status === 'COMPLETED').length / execution.agentExecutions.length) * 100
+      : 0;
 
   return (
     <div className="space-y-4">
@@ -49,16 +93,34 @@ function ExecutionCard({ execution }: { execution: any }) {
         projectName={execution.project.name}
         status={execution.status}
         progress={progress}
-        steps={[
-          { id: '1', name: '프로젝트 스캔', status: 'completed' },
-          { id: '2', name: '파일 분석', status: execution.status === 'RUNNING' ? 'running' : execution.status === 'COMPLETED' ? 'completed' : 'pending' },
-          { id: '3', name: '에이전트 실행', status: execution.status === 'RUNNING' ? 'running' : execution.status === 'COMPLETED' ? 'completed' : 'pending' },
-          { id: '4', name: '결과 통합', status: execution.status === 'COMPLETED' ? 'completed' : 'pending' }
-        ]}
+        steps={legacySteps}
         startedAt={execution.startedAt}
         completedAt={execution.completedAt}
       >
-        <ParallelAgentLanes agents={agents} />
+        {/* 8단계 파이프라인 뷰 (새 방식) */}
+        {hasStages ? (
+          <div className="mt-4">
+            <PipelineStagesView stages={execution.pipelineStages} />
+            {execution.resultCount > 0 && (
+              <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  분석 결과: <span className="font-semibold text-gray-900 dark:text-white">{execution.resultCount}개</span> 발견
+                </span>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* 기존 에이전트 레인 (폴백) */
+          <ParallelAgentLanes agents={execution.agentExecutions.map((ae: any) => ({
+            id: ae.id,
+            name: ae.agentName,
+            status: ae.status?.toLowerCase(),
+            startedAt: ae.createdAt,
+            completedAt: ae.completedAt,
+            taskCount: ae.tasks?.length || 0,
+            completedTaskCount: ae.tasks?.filter((t: any) => t.status === 'COMPLETED').length || 0
+          }))} />
+        )}
       </AnalysisExecutionView>
     </div>
   );
@@ -113,6 +175,11 @@ export default async function ExecutionPage() {
                     <span className="text-sm text-gray-500 ml-2">
                       {new Date(execution.startedAt).toLocaleString('ko-KR')}
                     </span>
+                    {execution.resultCount > 0 && (
+                      <span className="text-xs text-gray-400 ml-2">
+                        ({execution.resultCount}개 결과)
+                      </span>
+                    )}
                   </div>
                 </div>
                 {execution.score && (

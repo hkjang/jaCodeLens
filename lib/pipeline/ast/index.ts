@@ -3,4 +3,5 @@
  */
 
 export { TypeScriptParser } from './typescript-parser';
+export { JavaParser } from './java-parser';
 export { ASTCache } from './cache';
