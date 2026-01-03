@@ -4,16 +4,19 @@ import {
   Activity, ShieldAlert, BarChart3, Clock, 
   CheckCircle, XCircle, AlertTriangle, ArrowRight,
   PlayCircle, TrendingUp, FileCode, Layers,
-  FolderGit2, Rocket, Zap, ChevronRight
+  FolderGit2, Rocket, Zap, ChevronRight,
+  Plus, RefreshCw, Settings, Search, Target,
+  ArrowUpRight, ArrowDownRight, Minus, Sparkles
 } from 'lucide-react';
-import { getDashboardStats, getPipelineExecutions } from '@/lib/services/pipeline-data-service';
+import { getDashboardStats, getPipelineExecutions, getRecentProjects } from '@/lib/services/pipeline-data-service';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
-  const [stats, executions] = await Promise.all([
+  const [stats, executions, projects] = await Promise.all([
     getDashboardStats(),
-    getPipelineExecutions(5)
+    getPipelineExecutions(5),
+    getRecentProjects(4)
   ]);
 
   const latestExecution = executions[0];
@@ -21,9 +24,28 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">대시보드</h2>
-        <p className="text-gray-500">분석 파이프라인 현황 및 통계</p>
+      {/* Header with Actions */}
+      <header className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-bold text-gray-900 dark:text-white">대시보드</h2>
+          <p className="text-gray-500">분석 파이프라인 현황 및 통계</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard/execution"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors shadow-sm"
+          >
+            <PlayCircle className="w-4 h-4" />
+            분석 실행
+          </Link>
+          <Link
+            href="/dashboard/projects/new"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            새 프로젝트
+          </Link>
+        </div>
       </header>
 
       {/* Getting Started Section - Show for first-time users */}
@@ -73,38 +95,71 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard 
-          title="총 이슈" 
-          value={stats.totalIssues} 
-          icon={<BarChart3 className="w-6 h-6 text-blue-500" />} 
-          trend={`${stats.totalExecutions}회 분석 완료`}
-          href="/dashboard/results"
-        />
-        <StatCard 
-          title="Critical" 
-          value={stats.criticalCount} 
-          icon={<ShieldAlert className="w-6 h-6 text-red-500" />} 
-          trend="즉시 조치 필요"
-          isCritical={stats.criticalCount > 0}
-          href="/dashboard/results?severity=CRITICAL"
-        />
-        <StatCard 
-          title="High" 
-          value={stats.highCount} 
-          icon={<AlertTriangle className="w-6 h-6 text-orange-500" />} 
-          trend="높은 우선순위"
-          isWarning={stats.highCount > 0}
-          href="/dashboard/results?severity=HIGH"
-        />
-        <StatCard 
-          title="분석 점수" 
-          value={stats.averageScore || '-'} 
-          icon={<TrendingUp className="w-6 h-6 text-green-500" />} 
-          trend="최근 분석 기준"
-          href="/dashboard/execution"
-        />
+      {/* Health Score + Stats Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        {/* Health Score Gauge */}
+        <div className="lg:col-span-1 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl p-6 text-white shadow-lg">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-blue-100 text-sm font-medium">전체 건강도</span>
+            <Target className="w-5 h-5 text-blue-200" />
+          </div>
+          <div className="relative w-24 h-24 mx-auto mb-4">
+            <svg className="w-24 h-24 transform -rotate-90">
+              <circle cx="48" cy="48" r="40" stroke="rgba(255,255,255,0.2)" strokeWidth="8" fill="none" />
+              <circle 
+                cx="48" cy="48" r="40" 
+                stroke="white" strokeWidth="8" fill="none"
+                strokeDasharray={`${((stats.averageScore || 0) / 100) * 251.2} 251.2`}
+                strokeLinecap="round"
+              />
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-3xl font-bold">{stats.averageScore?.toFixed(0) || '-'}</span>
+            </div>
+          </div>
+          <div className="text-center">
+            <p className="text-blue-100 text-sm">100점 만점</p>
+            {stats.averageScore && stats.averageScore >= 80 && (
+              <p className="text-green-300 text-xs mt-1 flex items-center justify-center gap-1">
+                <Sparkles className="w-3 h-3" /> 우수한 코드 품질
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="lg:col-span-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard 
+            title="총 이슈" 
+            value={stats.totalIssues} 
+            icon={<BarChart3 className="w-6 h-6 text-blue-500" />} 
+            trend={`${stats.totalExecutions}회 분석`}
+            href="/dashboard/results"
+          />
+          <StatCard 
+            title="Critical" 
+            value={stats.criticalCount} 
+            icon={<ShieldAlert className="w-6 h-6 text-red-500" />} 
+            trend="즉시 조치 필요"
+            isCritical={stats.criticalCount > 0}
+            href="/dashboard/results?severity=CRITICAL"
+          />
+          <StatCard 
+            title="High" 
+            value={stats.highCount} 
+            icon={<AlertTriangle className="w-6 h-6 text-orange-500" />} 
+            trend="높은 우선순위"
+            isWarning={stats.highCount > 0}
+            href="/dashboard/results?severity=HIGH"
+          />
+          <StatCard 
+            title="Medium+Low" 
+            value={stats.mediumCount + stats.lowCount} 
+            icon={<CheckCircle className="w-6 h-6 text-green-500" />} 
+            trend="개선 권장"
+            href="/dashboard/results?severity=MEDIUM"
+          />
+        </div>
       </div>
 
       {/* Category Distribution */}
@@ -160,6 +215,78 @@ export default async function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Projects Overview - 프로젝트별 현황 */}
+      {projects.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              <FolderGit2 className="w-5 h-5 text-blue-500" />
+              프로젝트 현황
+            </h3>
+            <Link 
+              href="/dashboard/projects"
+              className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+            >
+              전체 보기 <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {projects.map((project) => (
+              <Link
+                key={project.id}
+                href={`/dashboard/projects/${project.id}`}
+                className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors group border border-transparent hover:border-blue-200 dark:hover:border-blue-800"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-gray-200 dark:bg-gray-600 flex items-center justify-center">
+                    <FolderGit2 className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                      {project.name}
+                    </p>
+                    <p className="text-xs text-gray-500">{project.type || '프로젝트'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  {project.lastAnalysis ? (
+                    <>
+                      <div className="text-right">
+                        <p className={`text-lg font-bold ${
+                          (project.lastAnalysis.score || 0) >= 80 ? 'text-green-500' :
+                          (project.lastAnalysis.score || 0) >= 60 ? 'text-yellow-500' :
+                          'text-red-500'
+                        }`}>
+                          {project.lastAnalysis.score?.toFixed(0) || '-'}
+                        </p>
+                        <p className="text-xs text-gray-500">{project.lastAnalysis.issueCount}개 이슈</p>
+                      </div>
+                      {(project.lastAnalysis.criticalCount > 0 || project.lastAnalysis.highCount > 0) && (
+                        <div className="flex gap-1">
+                          {project.lastAnalysis.criticalCount > 0 && (
+                            <span className="px-1.5 py-0.5 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded text-xs font-medium">
+                              {project.lastAnalysis.criticalCount}
+                            </span>
+                          )}
+                          {project.lastAnalysis.highCount > 0 && (
+                            <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 rounded text-xs font-medium">
+                              {project.lastAnalysis.highCount}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-sm text-gray-400">미분석</span>
+                  )}
+                  <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-500 transition-colors" />
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Recent Executions */}
       <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
@@ -229,12 +356,24 @@ export default async function DashboardPage() {
         )}
       </div>
 
-      {/* Quick Links */}
+      {/* Quick Links with Icons */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <QuickLink href="/dashboard/results" icon={<BarChart3 />} label="분석 결과" />
-        <QuickLink href="/dashboard/analysis" icon={<FileCode />} label="코드 이슈" />
-        <QuickLink href="/dashboard/architecture" icon={<Layers />} label="아키텍처" />
-        <QuickLink href="/dashboard/risks" icon={<AlertTriangle />} label="리스크 맵" />
+        <QuickLink href="/dashboard/results" icon={<BarChart3 />} label="분석 결과" description="이슈 목록 확인" />
+        <QuickLink href="/dashboard/code-elements" icon={<FileCode />} label="코드 요소" description="함수/클래스 분석" />
+        <QuickLink href="/dashboard/architecture" icon={<Layers />} label="아키텍처" description="구조 시각화" />
+        <QuickLink href="/dashboard/risks" icon={<AlertTriangle />} label="리스크 맵" description="위험도 분석" />
+      </div>
+
+      {/* Floating Quick Actions */}
+      <div className="fixed bottom-6 right-6 flex flex-col gap-3 z-50">
+        <Link
+          href="/dashboard/execution"
+          className="group flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all hover:scale-105"
+          title="새 분석 실행"
+        >
+          <PlayCircle className="w-5 h-5" />
+          <span className="hidden group-hover:inline text-sm font-medium">분석 실행</span>
+        </Link>
       </div>
     </div>
   );

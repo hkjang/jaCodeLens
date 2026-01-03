@@ -373,6 +373,7 @@ export async function getRiskMap(executeId?: string): Promise<RiskData[]> {
  */
 export async function getPipelineExecutions(limit = 10): Promise<Array<{
   id: string;
+  projectId: string;
   projectName: string;
   status: string;
   score: number | null;
@@ -390,7 +391,7 @@ export async function getPipelineExecutions(limit = 10): Promise<Array<{
       take: limit,
       orderBy: { startedAt: 'desc' },
       include: {
-        project: { select: { name: true } }
+        project: { select: { id: true, name: true } }
       }
     });
 
@@ -406,6 +407,7 @@ export async function getPipelineExecutions(limit = 10): Promise<Array<{
 
       return {
         id: exec.id,
+        projectId: exec.project.id,
         projectName: exec.project.name,
         status: exec.status,
         score: exec.score,
@@ -421,6 +423,74 @@ export async function getPipelineExecutions(limit = 10): Promise<Array<{
     }));
   } catch (error) {
     console.error('Failed to get pipeline executions:', error);
+    return [];
+  }
+}
+
+/**
+ * 최근 프로젝트 목록 및 통계 조회
+ */
+export async function getRecentProjects(limit = 5): Promise<Array<{
+  id: string;
+  name: string;
+  path: string;
+  type: string | null;
+  lastAnalysis: {
+    id: string;
+    score: number | null;
+    issueCount: number;
+    date: Date;
+    criticalCount: number;
+    highCount: number;
+  } | null;
+}>> {
+  try {
+    const projects = await prisma.project.findMany({
+      take: limit,
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        analysisExecutes: {
+          take: 1,
+          orderBy: { startedAt: 'desc' },
+          select: {
+            id: true,
+            score: true,
+            startedAt: true
+          }
+        }
+      }
+    });
+
+    return Promise.all(projects.map(async (project) => {
+      const lastExec = project.analysisExecutes[0];
+      let lastAnalysis = null;
+
+      if (lastExec) {
+        const results = await prisma.normalizedAnalysisResult.findMany({
+          where: { executeId: lastExec.id },
+          select: { severity: true }
+        });
+
+        lastAnalysis = {
+          id: lastExec.id,
+          score: lastExec.score,
+          issueCount: results.length,
+          date: lastExec.startedAt,
+          criticalCount: results.filter(r => r.severity === 'CRITICAL').length,
+          highCount: results.filter(r => r.severity === 'HIGH').length
+        };
+      }
+
+      return {
+        id: project.id,
+        name: project.name,
+        path: project.path,
+        type: project.type,
+        lastAnalysis
+      };
+    }));
+  } catch (error) {
+    console.error('Failed to get recent projects:', error);
     return [];
   }
 }
