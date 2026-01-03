@@ -7,8 +7,9 @@ import {
   ArrowLeft, ArrowUp, ArrowDown, Minus,
   Shield, BarChart3, Layers, Activity, TestTube, FileCode,
   AlertTriangle, CheckCircle, Clock, Zap, TrendingUp, TrendingDown,
-  ChevronRight, ExternalLink, PlayCircle, RefreshCw, Target,
-  History, LineChart, Code2, Copy, Check, Sparkles, Crown
+  ChevronRight, ChevronDown, ChevronUp, ExternalLink, PlayCircle, RefreshCw, Target,
+  History, LineChart, Code2, Copy, Check, Sparkles, Crown, X, Info, Wrench,
+  LucideIcon
 } from 'lucide-react';
 
 interface ProjectHealth {
@@ -42,6 +43,27 @@ interface ProjectHealth {
   trendData: Array<{ date: string; score: number }>;
 }
 
+interface CategoryConfig {
+  key: string;
+  label: string;
+  icon: LucideIcon;
+  bgColor: string;
+  borderColor: string;
+  activeBorder: string;
+  iconColor: string;
+  gradientFrom: string;
+  gradientTo: string;
+  description: string;
+  recommendation: string;
+  data: {
+    score: number;
+    issues: number;
+    [key: string]: number;
+  };
+  metric: string;
+  metricLabel: string;
+}
+
 export default function ProjectDetailPage() {
   const params = useParams();
   const projectId = params.id as string;
@@ -51,10 +73,20 @@ export default function ProjectDetailPage() {
   const [copied, setCopied] = useState(false);
   const [animatedScore, setAnimatedScore] = useState(0);
   const scoreAnimated = useRef(false);
+  const detailPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadProjectHealth();
   }, [projectId]);
+
+  // Scroll to detail panel when category is selected
+  useEffect(() => {
+    if (activeCategory && detailPanelRef.current) {
+      setTimeout(() => {
+        detailPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    }
+  }, [activeCategory]);
 
   // Animate score on load
   useEffect(() => {
@@ -102,6 +134,14 @@ export default function ProjectDetailPage() {
     }
   }
 
+  function handleCategoryClick(categoryKey: string) {
+    if (activeCategory === categoryKey) {
+      setActiveCategory(null);
+    } else {
+      setActiveCategory(categoryKey);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -131,7 +171,7 @@ export default function ProjectDetailPage() {
     BRONZE: { bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-700 dark:text-orange-300', icon: null }
   };
 
-  const categories = [
+  const categories: CategoryConfig[] = [
     { 
       key: 'security', 
       label: '보안', 
@@ -140,8 +180,13 @@ export default function ProjectDetailPage() {
       borderColor: 'border-red-200 dark:border-red-800',
       activeBorder: 'ring-red-500',
       iconColor: 'text-red-500',
+      gradientFrom: 'from-red-500',
+      gradientTo: 'to-rose-600',
+      description: '보안 취약점 및 위험 요소 분석',
+      recommendation: '보안 이슈는 즉시 조치가 필요합니다. Critical, High 순으로 우선 처리하세요.',
       data: health.categoryScores.security, 
-      metric: `${health.categoryScores.security.critical} Critical` 
+      metric: `${health.categoryScores.security.critical}`,
+      metricLabel: 'Critical 이슈'
     },
     { 
       key: 'quality', 
@@ -151,8 +196,13 @@ export default function ProjectDetailPage() {
       borderColor: 'border-blue-200 dark:border-blue-800',
       activeBorder: 'ring-blue-500',
       iconColor: 'text-blue-500',
+      gradientFrom: 'from-blue-500',
+      gradientTo: 'to-indigo-600',
+      description: '코드 품질 및 유지보수성 분석',
+      recommendation: '품질 개선은 장기적인 유지보수 비용을 절감합니다.',
       data: health.categoryScores.quality, 
-      metric: `$${health.categoryScores.quality.maintainabilityCost}K 유지비용` 
+      metric: `$${health.categoryScores.quality.maintainabilityCost}K`,
+      metricLabel: '예상 유지비용'
     },
     { 
       key: 'structure', 
@@ -162,8 +212,13 @@ export default function ProjectDetailPage() {
       borderColor: 'border-purple-200 dark:border-purple-800',
       activeBorder: 'ring-purple-500',
       iconColor: 'text-purple-500',
+      gradientFrom: 'from-purple-500',
+      gradientTo: 'to-violet-600',
+      description: '아키텍처 및 코드 구조 분석',
+      recommendation: '결합도를 낮추면 테스트와 유지보수가 쉬워집니다.',
       data: health.categoryScores.structure, 
-      metric: `${health.categoryScores.structure.coupling}% 결합도` 
+      metric: `${health.categoryScores.structure.coupling}%`,
+      metricLabel: '결합도'
     },
     { 
       key: 'operations', 
@@ -173,8 +228,13 @@ export default function ProjectDetailPage() {
       borderColor: 'border-green-200 dark:border-green-800',
       activeBorder: 'ring-green-500',
       iconColor: 'text-green-500',
+      gradientFrom: 'from-green-500',
+      gradientTo: 'to-emerald-600',
+      description: '운영 안정성 및 장애 위험 분석',
+      recommendation: '장애 위험도가 높은 코드를 우선 개선하세요.',
       data: health.categoryScores.operations, 
-      metric: `${health.categoryScores.operations.failureRisk}% 장애위험` 
+      metric: `${health.categoryScores.operations.failureRisk}%`,
+      metricLabel: '장애 위험도'
     },
     { 
       key: 'test', 
@@ -184,12 +244,40 @@ export default function ProjectDetailPage() {
       borderColor: 'border-cyan-200 dark:border-cyan-800',
       activeBorder: 'ring-cyan-500',
       iconColor: 'text-cyan-500',
+      gradientFrom: 'from-cyan-500',
+      gradientTo: 'to-teal-600',
+      description: '테스트 커버리지 및 품질 분석',
+      recommendation: '핵심 비즈니스 로직부터 테스트 커버리지를 높이세요.',
       data: health.categoryScores.test, 
-      metric: `${health.categoryScores.test.coverage}% 커버리지` 
+      metric: `${health.categoryScores.test.coverage}%`,
+      metricLabel: '테스트 커버리지'
     }
   ];
 
   const totalIssues = categories.reduce((acc, cat) => acc + cat.data.issues, 0);
+  const activeCategoryConfig = categories.find(c => c.key === activeCategory);
+  
+  // Filter issues by active category
+  const filteredIssues = activeCategory 
+    ? health.topIssues.filter(issue => issue.category.toLowerCase() === activeCategory.toLowerCase() || 
+        issue.category === activeCategory.toUpperCase())
+    : health.topIssues;
+
+  // Get severity counts for active category
+  const categorySeverityCounts = activeCategory ? {
+    critical: health.topIssues.filter(i => 
+      (i.category.toLowerCase() === activeCategory || i.category === activeCategory.toUpperCase()) && 
+      i.severity === 'CRITICAL'
+    ).length,
+    high: health.topIssues.filter(i => 
+      (i.category.toLowerCase() === activeCategory || i.category === activeCategory.toUpperCase()) && 
+      i.severity === 'HIGH'
+    ).length,
+    medium: health.topIssues.filter(i => 
+      (i.category.toLowerCase() === activeCategory || i.category === activeCategory.toUpperCase()) && 
+      i.severity === 'MEDIUM'
+    ).length,
+  } : null;
 
   return (
     <div className="space-y-6">
@@ -350,132 +438,341 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Category Analysis Cards with Fixed Colors */}
-      <div className="grid md:grid-cols-5 gap-4">
-        {categories.map((cat, idx) => (
-          <button
-            key={cat.key}
-            onClick={() => setActiveCategory(activeCategory === cat.key ? null : cat.key)}
-            className={`p-5 rounded-xl border-2 transition-all text-left group relative overflow-hidden ${
-              activeCategory === cat.key 
-                ? `${cat.bgColor} ${cat.borderColor} ring-2 ${cat.activeBorder} ring-offset-2 dark:ring-offset-gray-900`
-                : `bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-lg hover:scale-[1.02]`
-            }`}
-            style={{ animationDelay: `${idx * 100}ms` }}
-          >
-            {/* Progress bar background */}
-            <div 
-              className={`absolute bottom-0 left-0 h-1 ${
-                cat.data.score >= 80 ? 'bg-green-500' : 
-                cat.data.score >= 60 ? 'bg-yellow-500' : 
-                'bg-red-500'
-              } transition-all`}
-              style={{ width: `${cat.data.score}%` }}
-            />
-            
-            <div className="flex items-center justify-between mb-3">
-              <div className={`w-10 h-10 rounded-lg ${cat.bgColor} flex items-center justify-center transition-transform group-hover:scale-110`}>
-                <cat.icon className={`w-5 h-5 ${cat.iconColor}`} />
-              </div>
-              <span className={`text-3xl font-bold ${
-                cat.data.score >= 80 ? 'text-green-500' : 
-                cat.data.score >= 60 ? 'text-yellow-500' : 
-                'text-red-500'
-              }`}>
-                {cat.data.score}
-              </span>
-            </div>
-            <p className="font-semibold text-gray-900 dark:text-white mb-1">{cat.label}</p>
-            <p className="text-xs text-gray-500">{cat.data.issues.toLocaleString()}개 이슈</p>
-            <p className="text-xs text-gray-400 mt-1">{cat.metric}</p>
-            
-            {/* Issue proportion indicator */}
-            {totalIssues > 0 && (
-              <div className="mt-3 flex items-center gap-2">
-                <div className="flex-1 h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                  <div 
-                    className={cat.iconColor.replace('text-', 'bg-')}
-                    style={{ width: `${(cat.data.issues / totalIssues) * 100}%`, height: '100%' }}
-                  />
+      {/* Category Analysis Cards - Interactive Drill-Down */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-blue-500" />
+            카테고리별 분석
+          </h3>
+          {activeCategory && (
+            <button
+              onClick={() => setActiveCategory(null)}
+              className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              <X className="w-4 h-4" />
+              선택 해제
+            </button>
+          )}
+        </div>
+        
+        <div className="grid md:grid-cols-5 gap-4">
+          {categories.map((cat, idx) => (
+            <button
+              key={cat.key}
+              onClick={() => handleCategoryClick(cat.key)}
+              className={`p-5 rounded-xl border-2 transition-all text-left group relative overflow-hidden ${
+                activeCategory === cat.key 
+                  ? `${cat.bgColor} ${cat.borderColor} ring-2 ${cat.activeBorder} ring-offset-2 dark:ring-offset-gray-900 shadow-lg`
+                  : activeCategory && activeCategory !== cat.key
+                    ? 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 opacity-60 hover:opacity-100'
+                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-lg hover:scale-[1.02]'
+              }`}
+              style={{ animationDelay: `${idx * 100}ms` }}
+            >
+              {/* Progress bar background */}
+              <div 
+                className={`absolute bottom-0 left-0 h-1 ${
+                  cat.data.score >= 80 ? 'bg-green-500' : 
+                  cat.data.score >= 60 ? 'bg-yellow-500' : 
+                  'bg-red-500'
+                } transition-all`}
+                style={{ width: `${cat.data.score}%` }}
+              />
+              
+              <div className="flex items-center justify-between mb-3">
+                <div className={`w-10 h-10 rounded-lg ${cat.bgColor} flex items-center justify-center transition-transform group-hover:scale-110`}>
+                  <cat.icon className={`w-5 h-5 ${cat.iconColor}`} />
                 </div>
-                <span className="text-[10px] text-gray-400">
-                  {((cat.data.issues / totalIssues) * 100).toFixed(0)}%
+                <span className={`text-3xl font-bold ${
+                  cat.data.score >= 80 ? 'text-green-500' : 
+                  cat.data.score >= 60 ? 'text-yellow-500' : 
+                  'text-red-500'
+                }`}>
+                  {cat.data.score}
                 </span>
               </div>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Top Issues - Enhanced */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-red-50 to-transparent dark:from-red-900/10">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-              <Target className="w-5 h-5 text-red-500" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-gray-900 dark:text-white">즉시 조치 필요</h3>
-              <p className="text-xs text-gray-500">우선순위가 높은 이슈들</p>
-            </div>
-          </div>
-          <Link 
-            href={`/dashboard/projects/${projectId}/results`} 
-            className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-          >
-            전체 보기 <ChevronRight className="w-4 h-4" />
-          </Link>
-        </div>
-        <div className="divide-y divide-gray-100 dark:divide-gray-700">
-          {health.topIssues.slice(0, 5).map((issue, idx) => (
-            <div 
-              key={issue.id} 
-              className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-start gap-4 transition-all hover:pl-6 group"
-            >
-              <span className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold shadow-md ${
-                issue.severity === 'CRITICAL' ? 'bg-gradient-to-br from-red-500 to-rose-600' :
-                issue.severity === 'HIGH' ? 'bg-gradient-to-br from-orange-500 to-amber-600' :
-                'bg-gradient-to-br from-yellow-500 to-amber-500'
-              }`}>
-                {idx + 1}
-              </span>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                  {issue.message}
-                </p>
-                <div className="flex items-center gap-3 mt-2 text-sm text-gray-500">
-                  <span className="flex items-center gap-1 hover:text-blue-600 cursor-pointer">
-                    <FileCode className="w-3.5 h-3.5" />
-                    {issue.file}
-                  </span>
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
-                    issue.category === 'SECURITY' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
-                    issue.category === 'QUALITY' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                    issue.category === 'OPERATIONS' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                    'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
-                  }`}>
-                    {issue.category === 'SECURITY' && <Shield className="w-3 h-3" />}
-                    {issue.category === 'QUALITY' && <BarChart3 className="w-3 h-3" />}
-                    {issue.category === 'OPERATIONS' && <Activity className="w-3 h-3" />}
-                    {issue.category}
-                  </span>
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                    issue.severity === 'CRITICAL' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
-                    issue.severity === 'HIGH' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' :
-                    'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-                  }`}>
-                    {issue.severity}
+              <p className="font-semibold text-gray-900 dark:text-white mb-1">{cat.label}</p>
+              <p className="text-xs text-gray-500">{cat.data.issues.toLocaleString()}개 이슈</p>
+              <p className="text-xs text-gray-400 mt-1">{cat.metric} {cat.metricLabel}</p>
+              
+              {/* Issue proportion indicator */}
+              {totalIssues > 0 && (
+                <div className="mt-3 flex items-center gap-2">
+                  <div className="flex-1 h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div 
+                      className={cat.iconColor.replace('text-', 'bg-')}
+                      style={{ width: `${(cat.data.issues / totalIssues) * 100}%`, height: '100%' }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-gray-400">
+                    {((cat.data.issues / totalIssues) * 100).toFixed(0)}%
                   </span>
                 </div>
-                <p className="text-xs text-gray-400 mt-1.5">{issue.impact}</p>
+              )}
+
+              {/* Expand indicator */}
+              <div className={`absolute right-2 bottom-3 transition-all ${
+                activeCategory === cat.key ? 'opacity-100' : 'opacity-0 group-hover:opacity-60'
+              }`}>
+                {activeCategory === cat.key ? (
+                  <ChevronUp className="w-4 h-4 text-gray-400" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                )}
               </div>
-              <button className="shrink-0 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-medium rounded-lg shadow-sm hover:shadow-md transition-all opacity-80 group-hover:opacity-100">
-                개선하기
-              </button>
-            </div>
+            </button>
           ))}
         </div>
       </div>
+
+      {/* Expanded Category Detail Panel */}
+      {activeCategory && activeCategoryConfig && (
+        <div 
+          ref={detailPanelRef}
+          className={`bg-gradient-to-br ${activeCategoryConfig.gradientFrom} ${activeCategoryConfig.gradientTo} rounded-2xl p-6 text-white shadow-xl animate-slideDown overflow-hidden`}
+        >
+          <div className="flex items-start justify-between mb-6">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                <activeCategoryConfig.icon className="w-7 h-7 text-white" />
+              </div>
+              <div>
+                <h3 className="text-2xl font-bold">{activeCategoryConfig.label} 상세 분석</h3>
+                <p className="text-white/80">{activeCategoryConfig.description}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setActiveCategory(null)}
+              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-6">
+            {/* Score & Stats */}
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl p-5">
+              <h4 className="text-sm font-medium text-white/70 mb-4">점수 및 통계</h4>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="relative w-20 h-20">
+                  <svg className="w-20 h-20 transform -rotate-90">
+                    <circle cx="40" cy="40" r="34" stroke="rgba(255,255,255,0.2)" strokeWidth="6" fill="none" />
+                    <circle 
+                      cx="40" cy="40" r="34" 
+                      stroke="white"
+                      strokeWidth="6" 
+                      fill="none"
+                      strokeDasharray={`${(activeCategoryConfig.data.score / 100) * 213.5} 213.5`}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="text-2xl font-bold">{activeCategoryConfig.data.score}</span>
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <p className="text-3xl font-bold">{activeCategoryConfig.data.issues.toLocaleString()}</p>
+                  <p className="text-white/70">발견된 이슈</p>
+                </div>
+              </div>
+              
+              {/* Severity breakdown */}
+              {categorySeverityCounts && (
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-red-500/30 rounded-lg p-2 text-center">
+                    <p className="text-lg font-bold">{categorySeverityCounts.critical}</p>
+                    <p className="text-xs text-white/70">Critical</p>
+                  </div>
+                  <div className="bg-orange-500/30 rounded-lg p-2 text-center">
+                    <p className="text-lg font-bold">{categorySeverityCounts.high}</p>
+                    <p className="text-xs text-white/70">High</p>
+                  </div>
+                  <div className="bg-yellow-500/30 rounded-lg p-2 text-center">
+                    <p className="text-lg font-bold">{categorySeverityCounts.medium}</p>
+                    <p className="text-xs text-white/70">Medium</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Key Metric */}
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl p-5">
+              <h4 className="text-sm font-medium text-white/70 mb-4">핵심 지표</h4>
+              <div className="text-center py-4">
+                <p className="text-5xl font-bold mb-2">{activeCategoryConfig.metric}</p>
+                <p className="text-white/70">{activeCategoryConfig.metricLabel}</p>
+              </div>
+              <div className="mt-4 p-3 bg-white/10 rounded-lg">
+                <div className="flex items-center gap-2 mb-1">
+                  <Info className="w-4 h-4" />
+                  <span className="text-sm font-medium">권장 조치</span>
+                </div>
+                <p className="text-xs text-white/80">{activeCategoryConfig.recommendation}</p>
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="bg-white/10 backdrop-blur-sm rounded-xl p-5">
+              <h4 className="text-sm font-medium text-white/70 mb-4">빠른 액션</h4>
+              <div className="space-y-3">
+                <Link
+                  href={`/dashboard/projects/${projectId}/results?category=${activeCategory.toUpperCase()}`}
+                  className="flex items-center gap-3 p-3 bg-white/10 hover:bg-white/20 rounded-lg transition-colors group"
+                >
+                  <Target className="w-5 h-5" />
+                  <div className="flex-1">
+                    <p className="font-medium">전체 이슈 보기</p>
+                    <p className="text-xs text-white/60">{activeCategoryConfig.label} 관련 모든 이슈</p>
+                  </div>
+                  <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </Link>
+                <Link
+                  href={`/dashboard/projects/${projectId}/code-elements?category=${activeCategory}`}
+                  className="flex items-center gap-3 p-3 bg-white/10 hover:bg-white/20 rounded-lg transition-colors group"
+                >
+                  <Code2 className="w-5 h-5" />
+                  <div className="flex-1">
+                    <p className="font-medium">코드 요소 분석</p>
+                    <p className="text-xs text-white/60">문제 있는 코드 요소 확인</p>
+                  </div>
+                  <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </Link>
+                <button
+                  className="w-full flex items-center gap-3 p-3 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
+                >
+                  <Wrench className="w-5 h-5" />
+                  <div className="flex-1 text-left">
+                    <p className="font-medium">자동 수정 제안</p>
+                    <p className="text-xs text-white/60">AI 기반 코드 개선 제안</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Filtered Issues Preview */}
+          {filteredIssues.length > 0 && (
+            <div className="mt-6">
+              <h4 className="text-sm font-medium text-white/70 mb-3 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                {activeCategoryConfig.label} 관련 주요 이슈 ({filteredIssues.length}개)
+              </h4>
+              <div className="space-y-2">
+                {filteredIssues.slice(0, 3).map((issue, idx) => (
+                  <div 
+                    key={issue.id}
+                    className="flex items-center gap-3 p-3 bg-white/10 rounded-lg hover:bg-white/15 transition-colors"
+                  >
+                    <span className={`shrink-0 w-6 h-6 rounded flex items-center justify-center text-xs font-bold ${
+                      issue.severity === 'CRITICAL' ? 'bg-red-500' :
+                      issue.severity === 'HIGH' ? 'bg-orange-500' :
+                      'bg-yellow-500'
+                    }`}>
+                      {idx + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{issue.message}</p>
+                      <p className="text-xs text-white/60">{issue.file}</p>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      issue.severity === 'CRITICAL' ? 'bg-red-500/50' :
+                      issue.severity === 'HIGH' ? 'bg-orange-500/50' :
+                      'bg-yellow-500/50'
+                    }`}>
+                      {issue.severity}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {filteredIssues.length > 3 && (
+                <Link
+                  href={`/dashboard/projects/${projectId}/results?category=${activeCategory.toUpperCase()}`}
+                  className="mt-3 flex items-center justify-center gap-2 text-sm py-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
+                >
+                  +{filteredIssues.length - 3}개 더 보기 <ChevronRight className="w-4 h-4" />
+                </Link>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Top Issues - Show all when no category selected */}
+      {!activeCategory && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-red-50 to-transparent dark:from-red-900/10">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                <Target className="w-5 h-5 text-red-500" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-white">즉시 조치 필요</h3>
+                <p className="text-xs text-gray-500">우선순위가 높은 이슈들 - 카테고리를 클릭하여 필터링</p>
+              </div>
+            </div>
+            <Link 
+              href={`/dashboard/projects/${projectId}/results`} 
+              className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+            >
+              전체 보기 <ChevronRight className="w-4 h-4" />
+            </Link>
+          </div>
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {health.topIssues.slice(0, 5).map((issue, idx) => (
+              <div 
+                key={issue.id} 
+                className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-start gap-4 transition-all hover:pl-6 group cursor-pointer"
+                onClick={() => setActiveCategory(issue.category.toLowerCase())}
+              >
+                <span className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold shadow-md ${
+                  issue.severity === 'CRITICAL' ? 'bg-gradient-to-br from-red-500 to-rose-600' :
+                  issue.severity === 'HIGH' ? 'bg-gradient-to-br from-orange-500 to-amber-600' :
+                  'bg-gradient-to-br from-yellow-500 to-amber-500'
+                }`}>
+                  {idx + 1}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                    {issue.message}
+                  </p>
+                  <div className="flex items-center gap-3 mt-2 text-sm text-gray-500">
+                    <span className="flex items-center gap-1 hover:text-blue-600 cursor-pointer">
+                      <FileCode className="w-3.5 h-3.5" />
+                      {issue.file}
+                    </span>
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                      issue.category === 'SECURITY' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                      issue.category === 'QUALITY' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                      issue.category === 'OPERATIONS' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                      'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                    }`}>
+                      {issue.category === 'SECURITY' && <Shield className="w-3 h-3" />}
+                      {issue.category === 'QUALITY' && <BarChart3 className="w-3 h-3" />}
+                      {issue.category === 'OPERATIONS' && <Activity className="w-3 h-3" />}
+                      {issue.category}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                      issue.severity === 'CRITICAL' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                      issue.severity === 'HIGH' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' :
+                      'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                    }`}>
+                      {issue.severity}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1.5">{issue.impact}</p>
+                </div>
+                <button 
+                  className="shrink-0 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-medium rounded-lg shadow-sm hover:shadow-md transition-all opacity-80 group-hover:opacity-100"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  개선하기
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Trend Chart Enhanced */}
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm">
@@ -555,6 +852,19 @@ export default function ProjectDetailPage() {
           to {
             opacity: 1;
           }
+        }
+        @keyframes slideDown {
+          from {
+            opacity: 0;
+            transform: translateY(-20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .animate-slideDown {
+          animation: slideDown 0.3s ease-out;
         }
       `}</style>
     </div>
