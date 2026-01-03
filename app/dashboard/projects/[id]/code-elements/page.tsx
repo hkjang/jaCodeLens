@@ -76,15 +76,53 @@ export default function ProjectCodeElementsPage() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   // 뷰 모드
-  const [viewMode, setViewMode] = useState<'list' | 'tree' | 'complexity' | 'graph'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'tree' | 'complexity' | 'graph' | 'favorites'>('list');
   const [showCodePreview, setShowCodePreview] = useState(false);
   const [codePreviewFullscreen, setCodePreviewFullscreen] = useState(false);
+
+  // 비교 모드
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareElements, setCompareElements] = useState<CodeElement[]>([]);
+
+  // 검색 기록
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`search-history-${projectId}`);
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+
+  // 필터 프리셋
+  const [filterPresets, setFilterPresets] = useState<Array<{name: string; filters: any}>>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`filter-presets-${projectId}`);
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+
+  // 페이지네이션
+  const [displayLimit, setDisplayLimit] = useState(50);
+  const [showAllElements, setShowAllElements] = useState(false);
 
   // 선택된 요소
   const [selectedElement, setSelectedElement] = useState<CodeElement | null>(null);
 
-  // 즐겨찾기
-  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  // 즐겨찾기 (localStorage 연동)
+  const [favorites, setFavorites] = useState<Set<string>>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`favorites-${projectId}`);
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    }
+    return new Set();
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && projectId) {
+      localStorage.setItem(`favorites-${projectId}`, JSON.stringify([...favorites]));
+    }
+  }, [favorites, projectId]);
 
   // 단축키 모달
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -150,12 +188,30 @@ export default function ProjectCodeElementsPage() {
         setShowShortcuts(false);
         setCodePreviewFullscreen(false);
       }
-      // 1, 2, 3: 뷰 모드 전환
+      // 1, 2, 3, 4: 뷰 모드 전환
       if (!e.ctrlKey && !e.metaKey) {
         if (e.key === '1') setViewMode('list');
         if (e.key === '2') setViewMode('tree');
         if (e.key === '3') setViewMode('complexity');
         if (e.key === '4') setViewMode('graph');
+        // 화살표: 요소 탐색
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const idx = filteredElements.findIndex(el => el.id === selectedElement?.id);
+          const nextIdx = e.key === 'ArrowDown' 
+            ? Math.min(idx + 1, filteredElements.length - 1)
+            : Math.max(idx - 1, 0);
+          if (filteredElements[nextIdx]) {
+            setSelectedElement(filteredElements[nextIdx]);
+          }
+        }
+        // R: 필터 초기화
+        if (e.key === 'r' && document.activeElement === document.body) {
+          setTypeFilter('');
+          setAnalyzedFilter('');
+          setComplexityFilter('');
+          setSearchQuery('');
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown);
@@ -265,6 +321,61 @@ export default function ProjectCodeElementsPage() {
     });
   }
 
+  // 검색 기록 추가
+  function addSearchHistory(query: string) {
+    if (!query.trim()) return;
+    setSearchHistory(prev => {
+      const updated = [query, ...prev.filter(q => q !== query)].slice(0, 10);
+      localStorage.setItem(`search-history-${projectId}`, JSON.stringify(updated));
+      return updated;
+    });
+  }
+
+  // 비교 모드 토글
+  function toggleCompareElement(el: CodeElement) {
+    setCompareElements(prev => {
+      if (prev.find(e => e.id === el.id)) {
+        return prev.filter(e => e.id !== el.id);
+      }
+      if (prev.length >= 2) {
+        return [prev[1], el];
+      }
+      return [...prev, el];
+    });
+  }
+
+  // 필터 프리셋 저장
+  function saveFilterPreset(name: string) {
+    const preset = {
+      name,
+      filters: { typeFilter, analyzedFilter, complexityFilter, searchQuery, sortBy, sortOrder }
+    };
+    setFilterPresets(prev => {
+      const updated = [...prev.filter(p => p.name !== name), preset];
+      localStorage.setItem(`filter-presets-${projectId}`, JSON.stringify(updated));
+      return updated;
+    });
+  }
+
+  // 필터 프리셋 로드
+  function loadFilterPreset(preset: any) {
+    setTypeFilter(preset.filters.typeFilter || '');
+    setAnalyzedFilter(preset.filters.analyzedFilter || '');
+    setComplexityFilter(preset.filters.complexityFilter || '');
+    setSearchQuery(preset.filters.searchQuery || '');
+    setSortBy(preset.filters.sortBy || 'name');
+    setSortOrder(preset.filters.sortOrder || 'asc');
+  }
+
+  // 필터 프리셋 삭제
+  function deleteFilterPreset(name: string) {
+    setFilterPresets(prev => {
+      const updated = prev.filter(p => p.name !== name);
+      localStorage.setItem(`filter-presets-${projectId}`, JSON.stringify(updated));
+      return updated;
+    });
+  }
+
   // 내보내기 함수
   function exportToCSV() {
     const headers = ['이름', '유형', '파일', '줄 시작', '줄 끝', '복잡도', 'AI 요약'];
@@ -328,6 +439,35 @@ export default function ProjectCodeElementsPage() {
     if (lines > 100) return 'HIGH';
     if (lines > 30) return 'MEDIUM';
     return 'LOW';
+  }
+
+  // 간단한 구문 하이라이팅
+  function highlightSyntax(code: string, language: string): React.ReactNode[] {
+    const keywords = ['const', 'let', 'var', 'function', 'async', 'await', 'return', 'if', 'else', 'for', 'while', 'class', 'interface', 'type', 'export', 'import', 'from', 'default', 'extends', 'implements'];
+    const patterns: Array<{ regex: RegExp; className: string }> = [
+      { regex: /\/\/.*$/gm, className: 'text-gray-500 italic' }, // 주석
+      { regex: /"[^"]*"|'[^']*'|`[^`]*`/g, className: 'text-green-400' }, // 문자열
+      { regex: /\b(\d+)\b/g, className: 'text-orange-400' }, // 숫자
+      { regex: new RegExp(`\\b(${keywords.join('|')})\\b`, 'g'), className: 'text-purple-400 font-medium' }, // 키워드
+      { regex: /\b([A-Z][a-zA-Z0-9]*)\b/g, className: 'text-yellow-300' }, // 타입/클래스명
+    ];
+
+    let result = code;
+    patterns.forEach(({ regex, className }) => {
+      result = result.replace(regex, `<span class="${className}">$&</span>`);
+    });
+    return [<span key="code" dangerouslySetInnerHTML={{ __html: result }} />];
+  }
+
+  // 검색어 하이라이팅
+  function highlightSearch(text: string): React.ReactNode {
+    if (!searchQuery.trim()) return text;
+    const parts = text.split(new RegExp(`(${searchQuery})`, 'gi'));
+    return parts.map((part, i) => 
+      part.toLowerCase() === searchQuery.toLowerCase() 
+        ? <mark key={i} className="bg-yellow-200 dark:bg-yellow-700/50 px-0.5 rounded">{part}</mark>
+        : part
+    );
   }
 
   // 필터링 및 정렬
@@ -418,10 +558,9 @@ export default function ProjectCodeElementsPage() {
                 ['Ctrl + E', 'JSON 내보내기'],
                 ['Ctrl + F', '검색 포커스'],
                 ['Ctrl + /', '단축키 보기'],
-                ['1', '목록 뷰'],
-                ['2', '트리 뷰'],
-                ['3', '복잡도 뷰'],
-                ['4', '그래프 뷰'],
+                ['1/2/3/4', '뷰 모드 전환'],
+                ['↑/↓', '요소 탐색'],
+                ['R', '필터 초기화'],
                 ['ESC', '모달 닫기'],
               ].map(([key, desc]) => (
                 <div key={key} className="flex justify-between py-1">
@@ -543,14 +682,14 @@ export default function ProjectCodeElementsPage() {
         {/* 통계 카드 */}
         {stats && (
           <div className="lg:col-span-2 grid grid-cols-4 md:grid-cols-8 gap-2">
-            <StatCard label="전체" count={stats.total} color="bg-gray-500" icon={<Layers className="w-4 h-4" />} />
-            <StatCard label="분석 완료" count={stats.analyzed} color="bg-green-500" icon={<CheckCircle className="w-4 h-4" />} />
-            <StatCard label="대기 중" count={stats.pending} color="bg-yellow-500" icon={<Clock className="w-4 h-4" />} />
-            <StatCard label="클래스" count={stats.byType.CLASS || 0} color="bg-purple-500" />
-            <StatCard label="함수" count={stats.byType.FUNCTION || 0} color="bg-blue-500" />
-            <StatCard label="컴포넌트" count={stats.byType.COMPONENT || 0} color="bg-green-500" />
-            <StatCard label="메서드" count={stats.byType.METHOD || 0} color="bg-cyan-500" />
-            <StatCard label="인터페이스" count={stats.byType.INTERFACE || 0} color="bg-yellow-500" />
+            <StatCard label="전체" count={stats.total} color="bg-gray-500" icon={<Layers className="w-4 h-4" />} onClick={() => { setTypeFilter(''); setAnalyzedFilter(''); }} />
+            <StatCard label="분석 완료" count={stats.analyzed} color="bg-green-500" icon={<CheckCircle className="w-4 h-4" />} onClick={() => setAnalyzedFilter('true')} />
+            <StatCard label="대기 중" count={stats.pending} color="bg-yellow-500" icon={<Clock className="w-4 h-4" />} onClick={() => setAnalyzedFilter('false')} />
+            <StatCard label="클래스" count={stats.byType.CLASS || 0} color="bg-purple-500" onClick={() => setTypeFilter('CLASS')} />
+            <StatCard label="함수" count={stats.byType.FUNCTION || 0} color="bg-blue-500" onClick={() => setTypeFilter('FUNCTION')} />
+            <StatCard label="컴포넌트" count={stats.byType.COMPONENT || 0} color="bg-green-500" onClick={() => setTypeFilter('COMPONENT')} />
+            <StatCard label="메서드" count={stats.byType.METHOD || 0} color="bg-cyan-500" onClick={() => setTypeFilter('METHOD')} />
+            <StatCard label="인터페이스" count={stats.byType.INTERFACE || 0} color="bg-yellow-500" onClick={() => setTypeFilter('INTERFACE')} />
           </div>
         )}
 
@@ -565,10 +704,14 @@ export default function ProjectCodeElementsPage() {
               {/* 간단한 바 차트 */}
               <div className="flex-1 space-y-1">
                 {typeDistribution.map(t => (
-                  <div key={t.type} className="flex items-center gap-2 text-xs">
-                    <span className="w-16 text-gray-500">{t.type}</span>
+                  <div 
+                    key={t.type} 
+                    onClick={() => setTypeFilter(t.type)}
+                    className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded p-1 -m-1 transition-colors"
+                  >
+                    <span className="w-16 text-gray-500 font-medium">{t.type}</span>
                     <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${t.percentage}%`, backgroundColor: t.color }} />
+                      <div className="h-full rounded-full transition-all hover:opacity-80" style={{ width: `${t.percentage}%`, backgroundColor: t.color }} />
                     </div>
                     <span className="w-8 text-right text-gray-500">{t.count}</span>
                   </div>
@@ -590,7 +733,8 @@ export default function ProjectCodeElementsPage() {
             <div className="flex-1 h-6 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden flex shadow-inner">
               {complexityStats.high > 0 && (
                 <div 
-                  className="bg-gradient-to-r from-red-500 to-red-400 h-full flex items-center justify-center text-white text-xs font-medium" 
+                  onClick={() => setComplexityFilter('HIGH')}
+                  className="bg-gradient-to-r from-red-500 to-red-400 h-full flex items-center justify-center text-white text-xs font-medium cursor-pointer hover:brightness-110 transition-all" 
                   style={{ width: `${(complexityStats.high / (complexityStats.high + complexityStats.medium + complexityStats.low)) * 100}%` }}
                 >
                   {complexityStats.high > 2 && complexityStats.high}
@@ -598,7 +742,8 @@ export default function ProjectCodeElementsPage() {
               )}
               {complexityStats.medium > 0 && (
                 <div 
-                  className="bg-gradient-to-r from-yellow-500 to-yellow-400 h-full flex items-center justify-center text-white text-xs font-medium" 
+                  onClick={() => setComplexityFilter('MEDIUM')}
+                  className="bg-gradient-to-r from-yellow-500 to-yellow-400 h-full flex items-center justify-center text-white text-xs font-medium cursor-pointer hover:brightness-110 transition-all" 
                   style={{ width: `${(complexityStats.medium / (complexityStats.high + complexityStats.medium + complexityStats.low)) * 100}%` }}
                 >
                   {complexityStats.medium > 2 && complexityStats.medium}
@@ -606,7 +751,8 @@ export default function ProjectCodeElementsPage() {
               )}
               {complexityStats.low > 0 && (
                 <div 
-                  className="bg-gradient-to-r from-green-500 to-green-400 h-full flex items-center justify-center text-white text-xs font-medium" 
+                  onClick={() => setComplexityFilter('LOW')}
+                  className="bg-gradient-to-r from-green-500 to-green-400 h-full flex items-center justify-center text-white text-xs font-medium cursor-pointer hover:brightness-110 transition-all" 
                   style={{ width: `${(complexityStats.low / (complexityStats.high + complexityStats.medium + complexityStats.low)) * 100}%` }}
                 >
                   {complexityStats.low > 2 && complexityStats.low}
@@ -640,6 +786,7 @@ export default function ProjectCodeElementsPage() {
             { mode: 'tree' as const, label: '트리', key: '2' },
             { mode: 'complexity' as const, label: '복잡도', key: '3' },
             { mode: 'graph' as const, label: '그래프', key: '4' },
+            { mode: 'favorites' as const, label: `⭐ ${favorites.size}`, key: '5' },
           ].map(({ mode, label, key }) => (
             <button
               key={mode}
@@ -651,6 +798,15 @@ export default function ProjectCodeElementsPage() {
             </button>
           ))}
         </div>
+
+        {/* 비교 모드 토글 */}
+        <button
+          onClick={() => { setCompareMode(!compareMode); if (compareMode) setCompareElements([]); }}
+          className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition-all ${compareMode ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'}`}
+        >
+          <GitBranch className="w-4 h-4" />
+          비교 {compareMode && compareElements.length > 0 && `(${compareElements.length}/2)`}
+        </button>
 
         <div className="flex-1 relative min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -702,6 +858,42 @@ export default function ProjectCodeElementsPage() {
         <button onClick={loadData} className="p-2.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
           <RefreshCw className="w-5 h-5" />
         </button>
+
+        {/* 활성 필터 배지 */}
+        {(typeFilter || analyzedFilter || complexityFilter || searchQuery) && (
+          <div className="flex items-center gap-2 ml-2">
+            {typeFilter && (
+              <span 
+                onClick={() => setTypeFilter('')}
+                className="px-2 py-1 bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 text-xs rounded-full cursor-pointer hover:bg-purple-200 flex items-center gap-1"
+              >
+                {typeFilter} <X className="w-3 h-3" />
+              </span>
+            )}
+            {analyzedFilter && (
+              <span 
+                onClick={() => setAnalyzedFilter('')}
+                className="px-2 py-1 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-xs rounded-full cursor-pointer hover:bg-blue-200 flex items-center gap-1"
+              >
+                {analyzedFilter === 'true' ? '분석완료' : '대기중'} <X className="w-3 h-3" />
+              </span>
+            )}
+            {complexityFilter && (
+              <span 
+                onClick={() => setComplexityFilter('')}
+                className="px-2 py-1 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 text-xs rounded-full cursor-pointer hover:bg-orange-200 flex items-center gap-1"
+              >
+                {complexityFilter} <X className="w-3 h-3" />
+              </span>
+            )}
+            <button 
+              onClick={() => { setTypeFilter(''); setAnalyzedFilter(''); setComplexityFilter(''); setSearchQuery(''); }}
+              className="text-xs text-gray-500 hover:text-gray-700 underline"
+            >
+              모두 초기화
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 메인 콘텐츠 */}
@@ -747,11 +939,35 @@ export default function ProjectCodeElementsPage() {
               onSelectElement={(el: any) => setSelectedElement(el as CodeElement)}
               selectedId={selectedElement?.id}
             />
+          ) : viewMode === 'favorites' ? (
+            <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
+              {favorites.size > 0 ? (
+                elements.filter(el => favorites.has(el.id)).map(el => (
+                  <ElementRow key={el.id} el={el} selected={selectedElement?.id === el.id} onSelect={() => setSelectedElement(el)} onAnalyze={() => analyzeElement(el.id)} isFavorite={true} onToggleFavorite={() => toggleFavorite(el.id)} getTypeColor={getTypeColor} getComplexity={getComplexity} />
+                ))
+              ) : (
+                <div className="p-12 text-center text-gray-500">
+                  <Star className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p className="text-lg">즐겨찾기가 없습니다</p>
+                  <p className="text-sm mt-2">요소 옆의 ⭐을 클릭하여 즐겨찾기에 추가하세요</p>
+                </div>
+              )}
+            </div>
           ) : filteredElements.length > 0 ? (
             <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
-              {filteredElements.map(el => (
-                <ElementRow key={el.id} el={el} selected={selectedElement?.id === el.id} onSelect={() => setSelectedElement(el)} onAnalyze={() => analyzeElement(el.id)} isFavorite={favorites.has(el.id)} onToggleFavorite={() => toggleFavorite(el.id)} getTypeColor={getTypeColor} getComplexity={getComplexity} />
+              {(showAllElements ? filteredElements : filteredElements.slice(0, displayLimit)).map(el => (
+                <ElementRow key={el.id} el={el} selected={selectedElement?.id === el.id} onSelect={() => compareMode ? toggleCompareElement(el) : setSelectedElement(el)} onAnalyze={() => analyzeElement(el.id)} isFavorite={favorites.has(el.id)} onToggleFavorite={() => toggleFavorite(el.id)} getTypeColor={getTypeColor} getComplexity={getComplexity} />
               ))}
+              {!showAllElements && filteredElements.length > displayLimit && (
+                <div className="p-4 text-center">
+                  <button 
+                    onClick={() => setShowAllElements(true)}
+                    className="px-4 py-2 bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 rounded-lg hover:bg-blue-100 transition-colors"
+                  >
+                    {filteredElements.length - displayLimit}개 더 보기
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="p-12 text-center text-gray-500">
@@ -761,6 +977,35 @@ export default function ProjectCodeElementsPage() {
             </div>
           )}
         </div>
+
+        {/* 비교 패널 */}
+        {compareMode && compareElements.length === 2 && (
+          <div className="lg:col-span-3 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <GitBranch className="w-5 h-5" />
+              코드 요소 비교
+            </h3>
+            <div className="grid grid-cols-2 gap-4">
+              {compareElements.map((el, i) => (
+                <div key={el.id} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                  <div className="bg-gray-50 dark:bg-gray-900 p-2 flex items-center justify-between">
+                    <span className="font-medium">{el.name}</span>
+                    <button onClick={() => setCompareElements(prev => prev.filter(e => e.id !== el.id))} className="text-gray-400 hover:text-red-500">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <pre className="p-4 text-xs text-gray-300 bg-gray-900 max-h-64 overflow-auto font-mono">
+                    {el.content || el.signature || `// ${el.elementType}: ${el.name}`}
+                  </pre>
+                  <div className="p-2 text-xs text-gray-500 space-y-1 bg-gray-50 dark:bg-gray-900">
+                    <p>📍 {el.filePath} (L{el.lineStart}-{el.lineEnd})</p>
+                    <p>📊 복잡도: {getComplexity(el)} | {el.lineEnd - el.lineStart}줄</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 코드 미리보기 패널 */}
         {showCodePreview && selectedElement && (
@@ -779,9 +1024,9 @@ export default function ProjectCodeElementsPage() {
             <pre className={`p-4 text-sm text-gray-300 font-mono overflow-auto ${codePreviewFullscreen ? 'h-[calc(100%-3rem)]' : 'max-h-[500px]'}`}>
               <code>
                 {(selectedElement.content || selectedElement.signature || `// ${selectedElement.elementType}: ${selectedElement.name}`).split('\n').map((line, i) => (
-                  <div key={i} className="flex">
-                    <span className="select-none text-gray-500 text-right w-8 mr-4 flex-shrink-0">{selectedElement.lineStart + i}</span>
-                    <span className="flex-1">{line}</span>
+                  <div key={i} className="flex hover:bg-gray-800/50">
+                    <span className="select-none text-gray-600 text-right w-10 mr-4 flex-shrink-0 border-r border-gray-700 pr-2">{selectedElement.lineStart + i}</span>
+                    <span className="flex-1">{highlightSyntax(line, selectedElement.language)}</span>
                   </div>
                 ))}
               </code>
@@ -960,9 +1205,12 @@ function ElementRow({ el, selected, onSelect, onAnalyze, isFavorite, onToggleFav
   );
 }
 
-function StatCard({ label, count, color, icon }: { label: string; count: number; color: string; icon?: React.ReactNode }) {
+function StatCard({ label, count, color, icon, onClick }: { label: string; count: number; color: string; icon?: React.ReactNode; onClick?: () => void }) {
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 hover:shadow-md transition-shadow">
+    <div 
+      onClick={onClick} 
+      className={`bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 hover:shadow-md transition-all ${onClick ? 'cursor-pointer hover:scale-105' : ''}`}
+    >
       <div className="flex items-center gap-1.5">
         <div className={`w-2 h-2 rounded-full ${color}`} />
         <span className="text-xs text-gray-500 truncate">{label}</span>
