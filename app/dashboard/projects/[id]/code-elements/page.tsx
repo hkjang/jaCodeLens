@@ -1,17 +1,20 @@
 'use client';
 
 /**
- * 프로젝트 코드 요소 분석기 (고도화)
+ * 프로젝트 코드 요소 분석기 (Ultimate Version)
  * 
- * - 코드 요소 목록 조회
- * - 스캔 및 AI 분석
- * - 통계 및 검색
+ * 기능:
+ * - 코드 요소 목록/트리/복잡도 뷰
+ * - 스캔 및 AI 분석 (배치/단일)
  * - 복잡도 대시보드
- * - 파일 트리 뷰
- * - 고급 필터
+ * - 유형 분포 차트
+ * - 코드 미리보기
+ * - 내보내기 (CSV/JSON)
+ * - 키보드 단축키
+ * - 일괄 분석 진행 표시기
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -20,7 +23,8 @@ import {
   BarChart3, Layers, Eye, Sparkles, ChevronRight, Folder,
   AlertTriangle, TrendingUp, GitBranch, Clock, FolderTree,
   PieChart, Activity, Star, StarOff, Copy, ExternalLink,
-  Download, ChevronUp, SortAsc, SortDesc
+  Download, ChevronUp, SortAsc, SortDesc, Keyboard, FileJson,
+  Table, X, Maximize2, Minimize2
 } from 'lucide-react';
 
 interface CodeElement {
@@ -33,6 +37,7 @@ interface CodeElement {
   signature?: string;
   lineStart: number;
   lineEnd: number;
+  content?: string;
   parentName?: string;
   isAsync: boolean;
   isExported: boolean;
@@ -58,6 +63,7 @@ export default function ProjectCodeElementsPage() {
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeProgress, setAnalyzeProgress] = useState({ current: 0, total: 0 });
   const [scanError, setScanError] = useState<string | null>(null);
 
   // 필터/검색
@@ -70,12 +76,61 @@ export default function ProjectCodeElementsPage() {
 
   // 뷰 모드
   const [viewMode, setViewMode] = useState<'list' | 'tree' | 'complexity'>('list');
+  const [showCodePreview, setShowCodePreview] = useState(false);
+  const [codePreviewFullscreen, setCodePreviewFullscreen] = useState(false);
 
-  // 선택된 요소 (상세 보기)
+  // 선택된 요소
   const [selectedElement, setSelectedElement] = useState<CodeElement | null>(null);
 
   // 즐겨찾기
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+
+  // 단축키 모달
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
+  // 키보드 단축키
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Ctrl/Cmd + shortcuts
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key) {
+          case 's':
+            e.preventDefault();
+            if (!scanning) handleScan();
+            break;
+          case 'a':
+            e.preventDefault();
+            if (!analyzing && stats?.pending) handleAnalyze();
+            break;
+          case 'e':
+            e.preventDefault();
+            exportToJSON();
+            break;
+          case 'f':
+            e.preventDefault();
+            document.querySelector<HTMLInputElement>('input[type="text"]')?.focus();
+            break;
+          case '/':
+            e.preventDefault();
+            setShowShortcuts(true);
+            break;
+        }
+      }
+      // ESC: 모달 닫기
+      if (e.key === 'Escape') {
+        setShowShortcuts(false);
+        setCodePreviewFullscreen(false);
+      }
+      // 1, 2, 3: 뷰 모드 전환
+      if (!e.ctrlKey && !e.metaKey) {
+        if (e.key === '1') setViewMode('list');
+        if (e.key === '2') setViewMode('tree');
+        if (e.key === '3') setViewMode('complexity');
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [scanning, analyzing, stats]);
 
   useEffect(() => {
     loadData();
@@ -115,13 +170,11 @@ export default function ProjectCodeElementsPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        console.log('Scan result:', data);
         await loadData();
       } else {
         setScanError(data.error || '스캔 실패');
       }
     } catch (e: any) {
-      console.error('Scan failed', e);
       setScanError(e.message || '스캔 실패');
     } finally {
       setScanning(false);
@@ -129,20 +182,33 @@ export default function ProjectCodeElementsPage() {
   }
 
   async function handleAnalyze() {
+    if (!stats?.pending) return;
+    
     setAnalyzing(true);
+    setAnalyzeProgress({ current: 0, total: Math.min(stats.pending, 10) });
+    
     try {
-      const res = await fetch(`/api/projects/${projectId}/code-elements`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'analyze-batch', limit: 5 })
-      });
-      if (res.ok) {
+      // 연속 배치 분석 (10개까지)
+      for (let i = 0; i < Math.min(stats.pending, 10); i += 5) {
+        const res = await fetch(`/api/projects/${projectId}/code-elements`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'analyze-batch', limit: 5 })
+        });
+        if (res.ok) {
+          const result = await res.json();
+          setAnalyzeProgress(prev => ({ 
+            ...prev, 
+            current: prev.current + (result.analyzed || 0) 
+          }));
+        }
         await loadData();
       }
     } catch (e) {
       console.error('Analysis failed', e);
     } finally {
       setAnalyzing(false);
+      setAnalyzeProgress({ current: 0, total: 0 });
     }
   }
 
@@ -164,13 +230,53 @@ export default function ProjectCodeElementsPage() {
   function toggleFavorite(id: string) {
     setFavorites(prev => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  }
+
+  // 내보내기 함수
+  function exportToCSV() {
+    const headers = ['이름', '유형', '파일', '줄 시작', '줄 끝', '복잡도', 'AI 요약'];
+    const rows = filteredElements.map(el => [
+      el.name,
+      el.elementType,
+      el.filePath,
+      el.lineStart,
+      el.lineEnd,
+      getComplexity(el),
+      el.aiSummary || ''
+    ]);
+    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+    downloadFile(csv, 'code-elements.csv', 'text/csv');
+  }
+
+  function exportToJSON() {
+    const data = filteredElements.map(el => ({
+      name: el.name,
+      type: el.elementType,
+      file: el.filePath,
+      lineStart: el.lineStart,
+      lineEnd: el.lineEnd,
+      complexity: getComplexity(el),
+      aiSummary: el.aiSummary,
+      aiAnalysis: el.aiAnalysis
+    }));
+    downloadFile(JSON.stringify(data, null, 2), 'code-elements.json', 'application/json');
+  }
+
+  function downloadFile(content: string, filename: string, type: string) {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function copyToClipboard(text: string) {
+    navigator.clipboard.writeText(text);
   }
 
   function getTypeColor(type: string) {
@@ -204,14 +310,11 @@ export default function ProjectCodeElementsPage() {
       (!complexityFilter || getComplexity(e) === complexityFilter)
     );
 
-    // 정렬
     result.sort((a, b) => {
       let cmp = 0;
-      if (sortBy === 'name') {
-        cmp = a.name.localeCompare(b.name);
-      } else if (sortBy === 'lines') {
-        cmp = (b.lineEnd - b.lineStart) - (a.lineEnd - a.lineStart);
-      } else if (sortBy === 'complexity') {
+      if (sortBy === 'name') cmp = a.name.localeCompare(b.name);
+      else if (sortBy === 'lines') cmp = (b.lineEnd - b.lineStart) - (a.lineEnd - a.lineStart);
+      else if (sortBy === 'complexity') {
         const order = { HIGH: 0, MEDIUM: 1, LOW: 2 };
         cmp = order[getComplexity(a)] - order[getComplexity(b)];
       }
@@ -232,7 +335,7 @@ export default function ProjectCodeElementsPage() {
     return Object.entries(tree).sort((a, b) => a[0].localeCompare(b[0]));
   }, [filteredElements]);
 
-  // 복잡도 통계
+  // 통계
   const complexityStats = useMemo(() => {
     const analyzed = elements.filter(e => e.analyzedAt);
     return {
@@ -241,6 +344,19 @@ export default function ProjectCodeElementsPage() {
       low: analyzed.filter(e => getComplexity(e) === 'LOW').length,
     };
   }, [elements]);
+
+  // 유형 분포 (도넛 차트용)
+  const typeDistribution = useMemo(() => {
+    if (!stats) return [];
+    const types = ['CLASS', 'FUNCTION', 'METHOD', 'COMPONENT', 'INTERFACE'];
+    const colors = ['#a855f7', '#3b82f6', '#06b6d4', '#22c55e', '#eab308'];
+    return types.map((type, i) => ({
+      type,
+      count: stats.byType[type] || 0,
+      color: colors[i],
+      percentage: stats.total > 0 ? ((stats.byType[type] || 0) / stats.total * 100).toFixed(1) : 0
+    })).filter(t => t.count > 0);
+  }, [stats]);
 
   if (loading && elements.length === 0) {
     return (
@@ -252,6 +368,41 @@ export default function ProjectCodeElementsPage() {
 
   return (
     <div className="space-y-6">
+      {/* 키보드 단축키 모달 */}
+      {showShortcuts && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowShortcuts(false)}>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Keyboard className="w-5 h-5" />
+                키보드 단축키
+              </h3>
+              <button onClick={() => setShowShortcuts(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-2 text-sm">
+              {[
+                ['Ctrl + S', '프로젝트 스캔'],
+                ['Ctrl + A', 'AI 분석 실행'],
+                ['Ctrl + E', 'JSON 내보내기'],
+                ['Ctrl + F', '검색 포커스'],
+                ['Ctrl + /', '단축키 보기'],
+                ['1', '목록 뷰'],
+                ['2', '트리 뷰'],
+                ['3', '복잡도 뷰'],
+                ['ESC', '모달 닫기'],
+              ].map(([key, desc]) => (
+                <div key={key} className="flex justify-between py-1">
+                  <kbd className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs font-mono">{key}</kbd>
+                  <span className="text-gray-600 dark:text-gray-400">{desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 헤더 */}
       <header className="flex items-center justify-between">
         <div>
@@ -266,36 +417,77 @@ export default function ProjectCodeElementsPage() {
             <Code2 className="w-8 h-8 text-blue-500" />
             코드 요소 분석기
           </h2>
-          <p className="text-gray-500">프로젝트의 코드 요소를 추출하고 AI로 분석합니다</p>
+          <p className="text-gray-500 flex items-center gap-2">
+            프로젝트의 코드 요소를 추출하고 AI로 분석합니다
+            <button onClick={() => setShowShortcuts(true)} className="text-blue-500 hover:text-blue-600">
+              <Keyboard className="w-4 h-4" />
+            </button>
+          </p>
         </div>
         
         <div className="flex items-center gap-2">
+          {/* 내보내기 드롭다운 */}
+          <div className="relative group">
+            <button className="flex items-center gap-2 px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
+              <Download className="w-4 h-4" />
+              내보내기
+            </button>
+            <div className="absolute right-0 mt-1 py-1 w-32 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+              <button onClick={exportToCSV} className="flex items-center gap-2 px-4 py-2 w-full text-left hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">
+                <Table className="w-4 h-4" /> CSV
+              </button>
+              <button onClick={exportToJSON} className="flex items-center gap-2 px-4 py-2 w-full text-left hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">
+                <FileJson className="w-4 h-4" /> JSON
+              </button>
+            </div>
+          </div>
+
           <button
             onClick={handleScan}
             disabled={scanning}
             className="flex items-center gap-2 px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
           >
-            {scanning ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Play className="w-4 h-4" />
-            )}
+            {scanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
             스캔
           </button>
+          
           <button
             onClick={handleAnalyze}
             disabled={analyzing || !stats?.pending}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-lg disabled:opacity-50 shadow-lg"
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-lg disabled:opacity-50 shadow-lg relative overflow-hidden"
           >
-            {analyzing ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Sparkles className="w-4 h-4" />
+            {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            AI 분석 ({stats?.pending || 0}개)
+            {analyzing && analyzeProgress.total > 0 && (
+              <div 
+                className="absolute bottom-0 left-0 h-1 bg-white/50 transition-all"
+                style={{ width: `${(analyzeProgress.current / analyzeProgress.total) * 100}%` }}
+              />
             )}
-            AI 분석 ({stats?.pending || 0}개 대기)
           </button>
         </div>
       </header>
+
+      {/* 분석 진행 표시기 */}
+      {analyzing && analyzeProgress.total > 0 && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-blue-700 dark:text-blue-300 font-medium flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              AI 분석 진행 중...
+            </span>
+            <span className="text-blue-600 dark:text-blue-400 text-sm">
+              {analyzeProgress.current} / {analyzeProgress.total}
+            </span>
+          </div>
+          <div className="w-full h-2 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-blue-500 transition-all duration-500"
+              style={{ width: `${(analyzeProgress.current / analyzeProgress.total) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* 스캔 오류 */}
       {scanError && (
@@ -308,19 +500,46 @@ export default function ProjectCodeElementsPage() {
         </div>
       )}
 
-      {/* 통계 카드 */}
-      {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-8 gap-3">
-          <StatCard label="전체" count={stats.total} color="bg-gray-500" icon={<Layers className="w-4 h-4" />} />
-          <StatCard label="분석 완료" count={stats.analyzed} color="bg-green-500" icon={<CheckCircle className="w-4 h-4" />} />
-          <StatCard label="대기 중" count={stats.pending} color="bg-yellow-500" icon={<Clock className="w-4 h-4" />} />
-          <StatCard label="클래스" count={stats.byType.CLASS || 0} color="bg-purple-500" />
-          <StatCard label="함수" count={stats.byType.FUNCTION || 0} color="bg-blue-500" />
-          <StatCard label="컴포넌트" count={stats.byType.COMPONENT || 0} color="bg-green-500" />
-          <StatCard label="메서드" count={stats.byType.METHOD || 0} color="bg-cyan-500" />
-          <StatCard label="인터페이스" count={stats.byType.INTERFACE || 0} color="bg-yellow-500" />
-        </div>
-      )}
+      {/* 통계 및 차트 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* 통계 카드 */}
+        {stats && (
+          <div className="lg:col-span-2 grid grid-cols-4 md:grid-cols-8 gap-2">
+            <StatCard label="전체" count={stats.total} color="bg-gray-500" icon={<Layers className="w-4 h-4" />} />
+            <StatCard label="분석 완료" count={stats.analyzed} color="bg-green-500" icon={<CheckCircle className="w-4 h-4" />} />
+            <StatCard label="대기 중" count={stats.pending} color="bg-yellow-500" icon={<Clock className="w-4 h-4" />} />
+            <StatCard label="클래스" count={stats.byType.CLASS || 0} color="bg-purple-500" />
+            <StatCard label="함수" count={stats.byType.FUNCTION || 0} color="bg-blue-500" />
+            <StatCard label="컴포넌트" count={stats.byType.COMPONENT || 0} color="bg-green-500" />
+            <StatCard label="메서드" count={stats.byType.METHOD || 0} color="bg-cyan-500" />
+            <StatCard label="인터페이스" count={stats.byType.INTERFACE || 0} color="bg-yellow-500" />
+          </div>
+        )}
+
+        {/* 유형 분포 차트 */}
+        {typeDistribution.length > 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+            <h4 className="text-sm font-medium text-gray-500 mb-3 flex items-center gap-2">
+              <PieChart className="w-4 h-4" />
+              유형 분포
+            </h4>
+            <div className="flex items-center gap-3">
+              {/* 간단한 바 차트 */}
+              <div className="flex-1 space-y-1">
+                {typeDistribution.map(t => (
+                  <div key={t.type} className="flex items-center gap-2 text-xs">
+                    <span className="w-16 text-gray-500">{t.type}</span>
+                    <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${t.percentage}%`, backgroundColor: t.color }} />
+                    </div>
+                    <span className="w-8 text-right text-gray-500">{t.count}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* 복잡도 대시보드 */}
       {complexityStats.high + complexityStats.medium + complexityStats.low > 0 && (
@@ -330,24 +549,30 @@ export default function ProjectCodeElementsPage() {
             복잡도 분포
           </h3>
           <div className="flex items-center gap-4">
-            <div className="flex-1 h-4 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden flex">
+            <div className="flex-1 h-6 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden flex shadow-inner">
               {complexityStats.high > 0 && (
                 <div 
-                  className="bg-red-500 h-full" 
+                  className="bg-gradient-to-r from-red-500 to-red-400 h-full flex items-center justify-center text-white text-xs font-medium" 
                   style={{ width: `${(complexityStats.high / (complexityStats.high + complexityStats.medium + complexityStats.low)) * 100}%` }}
-                />
+                >
+                  {complexityStats.high > 2 && complexityStats.high}
+                </div>
               )}
               {complexityStats.medium > 0 && (
                 <div 
-                  className="bg-yellow-500 h-full" 
+                  className="bg-gradient-to-r from-yellow-500 to-yellow-400 h-full flex items-center justify-center text-white text-xs font-medium" 
                   style={{ width: `${(complexityStats.medium / (complexityStats.high + complexityStats.medium + complexityStats.low)) * 100}%` }}
-                />
+                >
+                  {complexityStats.medium > 2 && complexityStats.medium}
+                </div>
               )}
               {complexityStats.low > 0 && (
                 <div 
-                  className="bg-green-500 h-full" 
+                  className="bg-gradient-to-r from-green-500 to-green-400 h-full flex items-center justify-center text-white text-xs font-medium" 
                   style={{ width: `${(complexityStats.low / (complexityStats.high + complexityStats.medium + complexityStats.low)) * 100}%` }}
-                />
+                >
+                  {complexityStats.low > 2 && complexityStats.low}
+                </div>
               )}
             </div>
             <div className="flex items-center gap-4 text-sm">
@@ -369,34 +594,30 @@ export default function ProjectCodeElementsPage() {
       )}
 
       {/* 필터/검색 바 */}
-      <div className="flex items-center gap-4 p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+      <div className="flex items-center gap-4 p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex-wrap">
         {/* 뷰 모드 토글 */}
         <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
-          <button
-            onClick={() => setViewMode('list')}
-            className={`px-3 py-1.5 rounded text-sm ${viewMode === 'list' ? 'bg-white dark:bg-gray-600 shadow' : ''}`}
-          >
-            목록
-          </button>
-          <button
-            onClick={() => setViewMode('tree')}
-            className={`px-3 py-1.5 rounded text-sm ${viewMode === 'tree' ? 'bg-white dark:bg-gray-600 shadow' : ''}`}
-          >
-            트리
-          </button>
-          <button
-            onClick={() => setViewMode('complexity')}
-            className={`px-3 py-1.5 rounded text-sm ${viewMode === 'complexity' ? 'bg-white dark:bg-gray-600 shadow' : ''}`}
-          >
-            복잡도
-          </button>
+          {[
+            { mode: 'list' as const, label: '목록', key: '1' },
+            { mode: 'tree' as const, label: '트리', key: '2' },
+            { mode: 'complexity' as const, label: '복잡도', key: '3' },
+          ].map(({ mode, label, key }) => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className={`px-3 py-1.5 rounded text-sm transition-colors ${viewMode === mode ? 'bg-white dark:bg-gray-600 shadow' : ''}`}
+              title={`${label} (${key})`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
-        <div className="flex-1 relative">
+        <div className="flex-1 relative min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
           <input
             type="text"
-            placeholder="이름, 파일 경로, AI 요약 검색..."
+            placeholder="검색... (Ctrl+F)"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && loadData()}
@@ -404,11 +625,7 @@ export default function ProjectCodeElementsPage() {
           />
         </div>
 
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-          className="px-3 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
-        >
+        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="px-3 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm">
           <option value="">모든 유형</option>
           <option value="CLASS">클래스</option>
           <option value="FUNCTION">함수</option>
@@ -417,135 +634,113 @@ export default function ProjectCodeElementsPage() {
           <option value="INTERFACE">인터페이스</option>
         </select>
 
-        <select
-          value={complexityFilter}
-          onChange={(e) => setComplexityFilter(e.target.value)}
-          className="px-3 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
-        >
+        <select value={complexityFilter} onChange={(e) => setComplexityFilter(e.target.value)} className="px-3 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm">
           <option value="">모든 복잡도</option>
           <option value="HIGH">🔴 HIGH</option>
           <option value="MEDIUM">🟡 MEDIUM</option>
           <option value="LOW">🟢 LOW</option>
         </select>
 
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as any)}
-          className="px-3 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
-        >
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} className="px-3 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm">
           <option value="name">이름순</option>
           <option value="lines">크기순</option>
           <option value="complexity">복잡도순</option>
         </select>
 
-        <button
-          onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-          className="p-2.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
-        >
+        <button onClick={() => setSortOrder(o => o === 'asc' ? 'desc' : 'asc')} className="p-2.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
           {sortOrder === 'asc' ? <SortAsc className="w-5 h-5" /> : <SortDesc className="w-5 h-5" />}
         </button>
 
-        <button
-          onClick={loadData}
-          className="p-2.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+        {/* 코드 미리보기 토글 */}
+        <button 
+          onClick={() => setShowCodePreview(!showCodePreview)}
+          className={`p-2.5 rounded-lg ${showCodePreview ? 'bg-blue-100 text-blue-600' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}
+          title="코드 미리보기 토글"
         >
+          <Eye className="w-5 h-5" />
+        </button>
+
+        <button onClick={loadData} className="p-2.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
           <RefreshCw className="w-5 h-5" />
         </button>
       </div>
 
-      {/* 요소 목록 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* 목록/트리 */}
-        <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+      {/* 메인 콘텐츠 */}
+      <div className={`grid gap-6 ${showCodePreview ? 'grid-cols-1 lg:grid-cols-4' : 'grid-cols-1 lg:grid-cols-3'}`}>
+        {/* 요소 목록 */}
+        <div className={`${showCodePreview ? 'lg:col-span-2' : 'lg:col-span-2'} bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden`}>
           {viewMode === 'tree' ? (
-            // 트리 뷰
             <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
               {fileTree.map(([dir, items]) => (
                 <div key={dir}>
-                  <div className="px-4 py-2 bg-gray-50 dark:bg-gray-900 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <div className="px-4 py-2 bg-gray-50 dark:bg-gray-900 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 sticky top-0">
                     <Folder className="w-4 h-4" />
                     {dir}
                     <span className="text-xs text-gray-400">({items.length})</span>
                   </div>
                   {items.map(el => (
-                    <ElementRow 
-                      key={el.id} 
-                      el={el} 
-                      selected={selectedElement?.id === el.id}
-                      onSelect={() => setSelectedElement(el)}
-                      onAnalyze={() => analyzeElement(el.id)}
-                      isFavorite={favorites.has(el.id)}
-                      onToggleFavorite={() => toggleFavorite(el.id)}
-                      getTypeColor={getTypeColor}
-                      getComplexity={getComplexity}
-                    />
+                    <ElementRow key={el.id} el={el} selected={selectedElement?.id === el.id} onSelect={() => setSelectedElement(el)} onAnalyze={() => analyzeElement(el.id)} isFavorite={favorites.has(el.id)} onToggleFavorite={() => toggleFavorite(el.id)} getTypeColor={getTypeColor} getComplexity={getComplexity} />
                   ))}
                 </div>
               ))}
             </div>
           ) : viewMode === 'complexity' ? (
-            // 복잡도 뷰
             <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
-              {['HIGH', 'MEDIUM', 'LOW'].map(complexity => {
+              {(['HIGH', 'MEDIUM', 'LOW'] as const).map(complexity => {
                 const items = filteredElements.filter(e => getComplexity(e) === complexity);
                 if (items.length === 0) return null;
                 return (
                   <div key={complexity}>
-                    <div className={`px-4 py-2 flex items-center gap-2 text-sm font-medium ${
-                      complexity === 'HIGH' ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300' :
-                      complexity === 'MEDIUM' ? 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300' :
-                      'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300'
-                    }`}>
+                    <div className={`px-4 py-2 flex items-center gap-2 text-sm font-medium sticky top-0 ${complexity === 'HIGH' ? 'bg-red-50 dark:bg-red-900/20 text-red-700' : complexity === 'MEDIUM' ? 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700' : 'bg-green-50 dark:bg-green-900/20 text-green-700'}`}>
                       <AlertTriangle className="w-4 h-4" />
                       {complexity} ({items.length})
                     </div>
                     {items.map(el => (
-                      <ElementRow 
-                        key={el.id} 
-                        el={el} 
-                        selected={selectedElement?.id === el.id}
-                        onSelect={() => setSelectedElement(el)}
-                        onAnalyze={() => analyzeElement(el.id)}
-                        isFavorite={favorites.has(el.id)}
-                        onToggleFavorite={() => toggleFavorite(el.id)}
-                        getTypeColor={getTypeColor}
-                        getComplexity={getComplexity}
-                      />
+                      <ElementRow key={el.id} el={el} selected={selectedElement?.id === el.id} onSelect={() => setSelectedElement(el)} onAnalyze={() => analyzeElement(el.id)} isFavorite={favorites.has(el.id)} onToggleFavorite={() => toggleFavorite(el.id)} getTypeColor={getTypeColor} getComplexity={getComplexity} />
                     ))}
                   </div>
                 );
               })}
             </div>
+          ) : filteredElements.length > 0 ? (
+            <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
+              {filteredElements.map(el => (
+                <ElementRow key={el.id} el={el} selected={selectedElement?.id === el.id} onSelect={() => setSelectedElement(el)} onAnalyze={() => analyzeElement(el.id)} isFavorite={favorites.has(el.id)} onToggleFavorite={() => toggleFavorite(el.id)} getTypeColor={getTypeColor} getComplexity={getComplexity} />
+              ))}
+            </div>
           ) : (
-            // 일반 목록
-            filteredElements.length > 0 ? (
-              <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
-                {filteredElements.map((el) => (
-                  <ElementRow 
-                    key={el.id} 
-                    el={el} 
-                    selected={selectedElement?.id === el.id}
-                    onSelect={() => setSelectedElement(el)}
-                    onAnalyze={() => analyzeElement(el.id)}
-                    isFavorite={favorites.has(el.id)}
-                    onToggleFavorite={() => toggleFavorite(el.id)}
-                    getTypeColor={getTypeColor}
-                    getComplexity={getComplexity}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="p-12 text-center text-gray-500">
-                <Code2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p className="text-lg">코드 요소가 없습니다</p>
-                <p className="text-sm mt-2">스캔 버튼을 클릭하여 프로젝트를 스캔하세요</p>
-              </div>
-            )
+            <div className="p-12 text-center text-gray-500">
+              <Code2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <p className="text-lg">코드 요소가 없습니다</p>
+              <p className="text-sm mt-2">스캔 버튼을 클릭하여 프로젝트를 스캔하세요</p>
+            </div>
           )}
         </div>
 
+        {/* 코드 미리보기 패널 */}
+        {showCodePreview && selectedElement && (
+          <div className={`bg-gray-900 rounded-xl border border-gray-700 overflow-hidden ${codePreviewFullscreen ? 'fixed inset-4 z-50' : ''}`}>
+            <div className="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700">
+              <span className="text-sm text-gray-400 font-mono">{selectedElement.filePath}</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => copyToClipboard(selectedElement.signature || selectedElement.name)} className="p-1 text-gray-400 hover:text-white">
+                  <Copy className="w-4 h-4" />
+                </button>
+                <button onClick={() => setCodePreviewFullscreen(!codePreviewFullscreen)} className="p-1 text-gray-400 hover:text-white">
+                  {codePreviewFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+            <pre className={`p-4 text-sm text-gray-300 font-mono overflow-auto ${codePreviewFullscreen ? 'h-[calc(100%-3rem)]' : 'max-h-[500px]'}`}>
+              <code>
+                {selectedElement.signature || `// ${selectedElement.elementType}: ${selectedElement.name}\n// Lines: ${selectedElement.lineStart}-${selectedElement.lineEnd}`}
+              </code>
+            </pre>
+          </div>
+        )}
+
         {/* 상세 패널 */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 sticky top-4">
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 sticky top-4 max-h-[700px] overflow-y-auto">
           {selectedElement ? (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
@@ -553,17 +748,11 @@ export default function ProjectCodeElementsPage() {
                   {selectedElement.elementType}
                 </span>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => toggleFavorite(selectedElement.id)}
-                    className="p-1 text-gray-400 hover:text-yellow-500"
-                  >
+                  <button onClick={() => toggleFavorite(selectedElement.id)} className="p-1 text-gray-400 hover:text-yellow-500">
                     {favorites.has(selectedElement.id) ? <Star className="w-4 h-4 fill-yellow-500 text-yellow-500" /> : <StarOff className="w-4 h-4" />}
                   </button>
                   {!selectedElement.analyzedAt && (
-                    <button
-                      onClick={() => analyzeElement(selectedElement.id)}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white text-sm rounded shadow"
-                    >
+                    <button onClick={() => analyzeElement(selectedElement.id)} className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-blue-500 to-purple-500 text-white text-sm rounded shadow">
                       <Sparkles className="w-4 h-4" />
                       AI 분석
                     </button>
@@ -571,22 +760,15 @@ export default function ProjectCodeElementsPage() {
                 </div>
               </div>
 
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                {selectedElement.name}
-              </h3>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">{selectedElement.name}</h3>
 
-              {/* 복잡도 배지 */}
-              <div className="flex items-center gap-2">
-                <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                  getComplexity(selectedElement) === 'HIGH' ? 'bg-red-100 text-red-700' :
-                  getComplexity(selectedElement) === 'MEDIUM' ? 'bg-yellow-100 text-yellow-700' :
-                  'bg-green-100 text-green-700'
-                }`}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${getComplexity(selectedElement) === 'HIGH' ? 'bg-red-100 text-red-700' : getComplexity(selectedElement) === 'MEDIUM' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
                   복잡도: {getComplexity(selectedElement)}
                 </span>
-                <span className="text-xs text-gray-500">
-                  {selectedElement.lineEnd - selectedElement.lineStart} 줄
-                </span>
+                <span className="text-xs text-gray-500">{selectedElement.lineEnd - selectedElement.lineStart} 줄</span>
+                {selectedElement.isAsync && <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded">async</span>}
+                {selectedElement.isExported && <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded">export</span>}
               </div>
 
               <div className="text-sm text-gray-500 space-y-1">
@@ -595,13 +777,9 @@ export default function ProjectCodeElementsPage() {
                   <span className="truncate">{selectedElement.filePath}</span>
                 </p>
                 <p>줄: {selectedElement.lineStart} - {selectedElement.lineEnd}</p>
-                {selectedElement.parentName && (
-                  <p>부모: {selectedElement.parentName}</p>
-                )}
+                {selectedElement.parentName && <p>부모: {selectedElement.parentName}</p>}
                 {selectedElement.signature && (
-                  <pre className="font-mono text-xs bg-gray-100 dark:bg-gray-900 p-2 rounded overflow-x-auto">
-                    {selectedElement.signature}
-                  </pre>
+                  <pre className="font-mono text-xs bg-gray-100 dark:bg-gray-900 p-2 rounded overflow-x-auto">{selectedElement.signature}</pre>
                 )}
               </div>
 
@@ -611,9 +789,7 @@ export default function ProjectCodeElementsPage() {
                     <Sparkles className="w-4 h-4" />
                     AI 분석 요약
                   </h4>
-                  <p className="text-sm text-blue-600 dark:text-blue-400">
-                    {selectedElement.aiSummary}
-                  </p>
+                  <p className="text-sm text-blue-600 dark:text-blue-400">{selectedElement.aiSummary}</p>
                 </div>
               )}
 
@@ -622,9 +798,7 @@ export default function ProjectCodeElementsPage() {
                   {selectedElement.aiAnalysis.purpose && (
                     <div>
                       <h4 className="text-xs font-medium text-gray-500 mb-1">🎯 목적</h4>
-                      <p className="text-sm text-gray-700 dark:text-gray-300">
-                        {selectedElement.aiAnalysis.purpose}
-                      </p>
+                      <p className="text-sm text-gray-700 dark:text-gray-300">{selectedElement.aiAnalysis.purpose}</p>
                     </div>
                   )}
                   {selectedElement.aiAnalysis.issues?.length > 0 && (
@@ -633,12 +807,7 @@ export default function ProjectCodeElementsPage() {
                       <div className="space-y-1">
                         {selectedElement.aiAnalysis.issues.map((issue: any, i: number) => (
                           <div key={i} className="text-sm p-2 bg-red-50 dark:bg-red-900/20 rounded">
-                            <span className={`text-xs font-medium ${
-                              issue.severity === 'HIGH' ? 'text-red-600' : 
-                              issue.severity === 'MEDIUM' ? 'text-yellow-600' : 'text-blue-600'
-                            }`}>
-                              [{issue.severity}]
-                            </span>
+                            <span className={`text-xs font-medium ${issue.severity === 'HIGH' ? 'text-red-600' : issue.severity === 'MEDIUM' ? 'text-yellow-600' : 'text-blue-600'}`}>[{issue.severity}]</span>
                             <span className="ml-2 text-gray-700 dark:text-gray-300">{issue.description}</span>
                           </div>
                         ))}
@@ -650,10 +819,7 @@ export default function ProjectCodeElementsPage() {
                       <h4 className="text-xs font-medium text-gray-500 mb-1">💡 개선 제안</h4>
                       <ul className="text-sm text-gray-700 dark:text-gray-300 space-y-1">
                         {selectedElement.aiAnalysis.suggestions.map((s: string, i: number) => (
-                          <li key={i} className="flex items-start gap-2">
-                            <span className="text-green-500">•</span>
-                            {s}
-                          </li>
+                          <li key={i} className="flex items-start gap-2"><span className="text-green-500">•</span>{s}</li>
                         ))}
                       </ul>
                     </div>
@@ -675,77 +841,32 @@ export default function ProjectCodeElementsPage() {
   );
 }
 
-function ElementRow({ 
-  el, 
-  selected, 
-  onSelect, 
-  onAnalyze,
-  isFavorite,
-  onToggleFavorite,
-  getTypeColor,
-  getComplexity
-}: { 
-  el: CodeElement; 
-  selected: boolean;
-  onSelect: () => void;
-  onAnalyze: () => void;
-  isFavorite: boolean;
-  onToggleFavorite: () => void;
-  getTypeColor: (type: string) => string;
-  getComplexity: (el: CodeElement) => 'LOW' | 'MEDIUM' | 'HIGH';
-}) {
+function ElementRow({ el, selected, onSelect, onAnalyze, isFavorite, onToggleFavorite, getTypeColor, getComplexity }: { el: CodeElement; selected: boolean; onSelect: () => void; onAnalyze: () => void; isFavorite: boolean; onToggleFavorite: () => void; getTypeColor: (t: string) => string; getComplexity: (e: CodeElement) => 'LOW' | 'MEDIUM' | 'HIGH' }) {
   const complexity = getComplexity(el);
-  
   return (
-    <div
-      onClick={onSelect}
-      className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${
-        selected ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500' : ''
-      }`}
-    >
+    <div onClick={onSelect} className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${selected ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500' : ''}`}>
       <div className="flex items-start gap-3">
-        <span className={`px-2 py-0.5 rounded text-xs font-medium ${getTypeColor(el.elementType)}`}>
-          {el.elementType}
-        </span>
+        <span className={`px-2 py-0.5 rounded text-xs font-medium ${getTypeColor(el.elementType)}`}>{el.elementType}</span>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-gray-900 dark:text-white">{el.name}</span>
             {el.isAsync && <span className="text-xs text-purple-500">async</span>}
             {el.isExported && <span className="text-xs text-green-500">export</span>}
-            <span className={`px-1.5 py-0.5 rounded text-xs ${
-              complexity === 'HIGH' ? 'bg-red-100 text-red-600' :
-              complexity === 'MEDIUM' ? 'bg-yellow-100 text-yellow-600' :
-              'bg-green-100 text-green-600'
-            }`}>
-              {complexity}
-            </span>
+            <span className={`px-1.5 py-0.5 rounded text-xs ${complexity === 'HIGH' ? 'bg-red-100 text-red-600' : complexity === 'MEDIUM' ? 'bg-yellow-100 text-yellow-600' : 'bg-green-100 text-green-600'}`}>{complexity}</span>
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
             <FileCode className="w-3 h-3" />
             <span className="truncate">{el.filePath}</span>
             <span>L{el.lineStart}-{el.lineEnd}</span>
           </div>
-          {el.aiSummary && (
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 line-clamp-1">
-              ✨ {el.aiSummary}
-            </p>
-          )}
+          {el.aiSummary && <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 line-clamp-1">✨ {el.aiSummary}</p>}
         </div>
         <div className="flex items-center gap-1">
-          <button
-            onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
-            className="p-1 text-gray-400 hover:text-yellow-500"
-          >
+          <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }} className="p-1 text-gray-400 hover:text-yellow-500">
             {isFavorite ? <Star className="w-4 h-4 fill-yellow-500 text-yellow-500" /> : <StarOff className="w-4 h-4" />}
           </button>
-          {el.analyzedAt ? (
-            <CheckCircle className="w-4 h-4 text-green-500" />
-          ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); onAnalyze(); }}
-              className="p-1 text-gray-400 hover:text-blue-500"
-              title="AI 분석"
-            >
+          {el.analyzedAt ? <CheckCircle className="w-4 h-4 text-green-500" /> : (
+            <button onClick={(e) => { e.stopPropagation(); onAnalyze(); }} className="p-1 text-gray-400 hover:text-blue-500" title="AI 분석">
               <Sparkles className="w-4 h-4" />
             </button>
           )}
@@ -758,13 +879,13 @@ function ElementRow({
 
 function StatCard({ label, count, color, icon }: { label: string; count: number; color: string; icon?: React.ReactNode }) {
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3 hover:shadow-md transition-shadow">
-      <div className="flex items-center gap-2">
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 hover:shadow-md transition-shadow">
+      <div className="flex items-center gap-1.5">
         <div className={`w-2 h-2 rounded-full ${color}`} />
-        <span className="text-sm text-gray-500">{label}</span>
+        <span className="text-xs text-gray-500 truncate">{label}</span>
         {icon && <span className="text-gray-400 ml-auto">{icon}</span>}
       </div>
-      <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{count}</div>
+      <div className="text-xl font-bold text-gray-900 dark:text-white mt-1">{count}</div>
     </div>
   );
 }
