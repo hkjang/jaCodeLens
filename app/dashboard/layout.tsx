@@ -28,6 +28,8 @@ import {
 import { useRole, UserRole, roleConfigs } from '@/lib/contexts/RoleContext';
 
 const allMenuItems = {
+  projects: { href: '/dashboard/projects', icon: <LayoutDashboard className="w-4 h-4" />, label: '프로젝트' },
+  'new-project': { href: '/dashboard/projects/new', icon: <PlayCircle className="w-4 h-4" />, label: '새 프로젝트' },
   dashboard: { href: '/dashboard', icon: <LayoutDashboard className="w-4 h-4" />, label: '대시보드' },
   execution: { href: '/dashboard/execution', icon: <PlayCircle className="w-4 h-4" />, label: '파이프라인 실행' },
   results: { href: '/dashboard/results', icon: <BarChart3 className="w-4 h-4" />, label: '분석 결과' },
@@ -59,6 +61,7 @@ const allMenuItems = {
 };
 
 const menuSections: Record<string, { title: string; items: string[] }> = {
+  projects: { title: '프로젝트', items: ['projects', 'new-project'] },
   pipeline: { title: '파이프라인', items: ['dashboard', 'execution', 'results'] },
   analysis: { title: '분석 결과', items: ['code-issues', 'improvements', 'architecture', 'dependencies', 'risk-heatmap'] },
   selfAnalysis: { title: 'Self Analysis', items: ['self-analysis', 'self-baseline', 'self-backlog', 'self-policy', 'code-elements'] },

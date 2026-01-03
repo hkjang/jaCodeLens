@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { 
   Activity, ShieldAlert, BarChart3, Clock, 
   CheckCircle, XCircle, AlertTriangle, ArrowRight,
-  PlayCircle, TrendingUp, FileCode, Layers
+  PlayCircle, TrendingUp, FileCode, Layers,
+  FolderGit2, Rocket, Zap, ChevronRight
 } from 'lucide-react';
 import { getDashboardStats, getPipelineExecutions } from '@/lib/services/pipeline-data-service';
 
@@ -16,6 +17,7 @@ export default async function DashboardPage() {
   ]);
 
   const latestExecution = executions[0];
+  const isFirstTime = stats.totalIssues === 0 && executions.length === 0;
 
   return (
     <div className="space-y-6">
@@ -23,6 +25,53 @@ export default async function DashboardPage() {
         <h2 className="text-3xl font-bold text-gray-900 dark:text-white">대시보드</h2>
         <p className="text-gray-500">분석 파이프라인 현황 및 통계</p>
       </header>
+
+      {/* Getting Started Section - Show for first-time users */}
+      {isFirstTime && (
+        <div className="bg-gradient-to-br from-blue-600 via-blue-700 to-cyan-600 rounded-2xl p-8 text-white shadow-xl">
+          <div className="flex items-start gap-6">
+            <div className="hidden md:flex w-16 h-16 rounded-2xl bg-white/10 items-center justify-center shrink-0">
+              <Rocket className="w-8 h-8" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-2xl font-bold mb-2">JacodeLens 시작하기</h3>
+              <p className="text-blue-100 mb-6 max-w-2xl">
+                AI 기반 코드 분석을 통해 보안 취약점, 코드 품질 문제, 아키텍처 결함을 자동으로 탐지하세요.
+                아래 3단계를 따라 첫 번째 분석을 시작해 보세요.
+              </p>
+              
+              {/* 3-Step Guide */}
+              <div className="grid md:grid-cols-3 gap-4">
+                <StepCard 
+                  step={1}
+                  icon={<FolderGit2 className="w-5 h-5" />}
+                  title="프로젝트 연결"
+                  description="Git 저장소 또는 로컬 경로로 프로젝트를 추가하세요"
+                  href="/dashboard/projects/new"
+                  buttonText="프로젝트 추가"
+                  active
+                />
+                <StepCard 
+                  step={2}
+                  icon={<Zap className="w-5 h-5" />}
+                  title="분석 실행"
+                  description="8단계 파이프라인으로 코드를 자동 분석합니다"
+                  href="/dashboard/execution"
+                  buttonText="실행하기"
+                />
+                <StepCard 
+                  step={3}
+                  icon={<BarChart3 className="w-5 h-5" />}
+                  title="결과 확인"
+                  description="발견된 이슈와 개선 제안을 확인하세요"
+                  href="/dashboard/results"
+                  buttonText="결과 보기"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -273,5 +322,41 @@ function QuickLink({ href, icon, label }: { href: string; icon: React.ReactNode;
       <span className="text-gray-400">{icon}</span>
       <span className="font-medium text-gray-700 dark:text-gray-300">{label}</span>
     </Link>
+  );
+}
+
+function StepCard({ step, icon, title, description, href, buttonText, active }: {
+  step: number;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  href: string;
+  buttonText: string;
+  active?: boolean;
+}) {
+  return (
+    <div className={`p-4 rounded-xl transition-all ${active ? 'bg-white/20 ring-2 ring-white/30' : 'bg-white/10 hover:bg-white/15'}`}>
+      <div className="flex items-center gap-3 mb-3">
+        <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+          active ? 'bg-white text-blue-600' : 'bg-white/20 text-white'
+        }`}>
+          {step}
+        </span>
+        <span className="text-white/80">{icon}</span>
+      </div>
+      <h4 className="font-semibold text-white mb-1">{title}</h4>
+      <p className="text-sm text-blue-100 mb-4">{description}</p>
+      <Link
+        href={href}
+        className={`inline-flex items-center gap-1 text-sm font-medium ${
+          active 
+            ? 'px-4 py-2 bg-white text-blue-600 rounded-lg hover:bg-blue-50' 
+            : 'text-white/80 hover:text-white'
+        }`}
+      >
+        {buttonText}
+        <ChevronRight className="w-4 h-4" />
+      </Link>
+    </div>
   );
 }
