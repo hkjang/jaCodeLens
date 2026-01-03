@@ -69,6 +69,7 @@ const globalMenuSections = [
     key: 'operations',
     title: '운영',
     items: [
+      { href: '/dashboard/dependencies', icon: <GitBranch className="w-4 h-4" />, label: '의존성 분석' },
       { href: '/dashboard/operations', icon: <Activity className="w-4 h-4" />, label: '모니터링' },
       { href: '/dashboard/logs', icon: <FileText className="w-4 h-4" />, label: '로그' },
       { href: '/dashboard/notifications', icon: <Bell className="w-4 h-4" />, label: '알림' },
