@@ -267,26 +267,35 @@ export default function ProjectCodeElementsPage() {
     }
   }
 
-  async function handleAnalyze() {
+  async function handleAnalyze(analyzeAll = false) {
     if (!stats?.pending) return;
     
+    const totalToAnalyze = analyzeAll ? stats.pending : Math.min(stats.pending, 20);
+    const batchSize = 10;
+    
     setAnalyzing(true);
-    setAnalyzeProgress({ current: 0, total: Math.min(stats.pending, 10) });
+    setAnalyzeProgress({ current: 0, total: totalToAnalyze });
     
     try {
-      // 연속 배치 분석 (10개까지)
-      for (let i = 0; i < Math.min(stats.pending, 10); i += 5) {
+      // 연속 배치 분석 (전체 또는 20개)
+      let analyzed = 0;
+      while (analyzed < totalToAnalyze) {
         const res = await fetch(`/api/projects/${projectId}/code-elements`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'analyze-batch', limit: 5 })
+          body: JSON.stringify({ action: 'analyze-batch', limit: batchSize })
         });
         if (res.ok) {
           const result = await res.json();
+          const count = result.analyzed || 0;
+          if (count === 0) break; // 더 이상 분석할 요소 없음
+          analyzed += count;
           setAnalyzeProgress(prev => ({ 
             ...prev, 
-            current: prev.current + (result.analyzed || 0) 
+            current: Math.min(prev.current + count, totalToAnalyze)
           }));
+        } else {
+          break;
         }
         await loadData();
       }
@@ -628,20 +637,48 @@ export default function ProjectCodeElementsPage() {
             스캔
           </button>
           
-          <button
-            onClick={handleAnalyze}
-            disabled={analyzing || !stats?.pending}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-lg disabled:opacity-50 shadow-lg relative overflow-hidden"
-          >
-            {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            AI 분석 ({stats?.pending || 0}개)
-            {analyzing && analyzeProgress.total > 0 && (
-              <div 
-                className="absolute bottom-0 left-0 h-1 bg-white/50 transition-all"
-                style={{ width: `${(analyzeProgress.current / analyzeProgress.total) * 100}%` }}
-              />
-            )}
-          </button>
+          <div className="relative group">
+            <button
+              onClick={() => handleAnalyze(false)}
+              disabled={analyzing || !stats?.pending}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-l-lg disabled:opacity-50 shadow-lg relative overflow-hidden"
+            >
+              {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              AI 분석 ({stats?.pending || 0}개)
+              {analyzing && analyzeProgress.total > 0 && (
+                <div 
+                  className="absolute bottom-0 left-0 h-1 bg-white/50 transition-all"
+                  style={{ width: `${(analyzeProgress.current / analyzeProgress.total) * 100}%` }}
+                />
+              )}
+            </button>
+            <button
+              onClick={() => handleAnalyze(true)}
+              disabled={analyzing || !stats?.pending}
+              className="px-2 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-r-lg disabled:opacity-50 border-l border-purple-500"
+              title="전체 분석"
+            >
+              <ChevronDown className="w-4 h-4" />
+            </button>
+            <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 w-48">
+              <button
+                onClick={() => handleAnalyze(false)}
+                disabled={analyzing}
+                className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 rounded-t-lg flex items-center gap-2 disabled:opacity-50"
+              >
+                <Zap className="w-4 h-4 text-yellow-500" />
+                빠른 분석 (20개)
+              </button>
+              <button
+                onClick={() => handleAnalyze(true)}
+                disabled={analyzing}
+                className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 rounded-b-lg flex items-center gap-2 disabled:opacity-50"
+              >
+                <Sparkles className="w-4 h-4 text-purple-500" />
+                전체 분석 ({stats?.pending || 0}개)
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
