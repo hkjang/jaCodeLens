@@ -6,8 +6,13 @@ import {
   Plus, FolderGit2, GitBranch, Clock, CheckCircle, 
   AlertTriangle, PlayCircle, Settings, Trash2, RefreshCw,
   ChevronRight, Search, Filter, Shield, BarChart3, Activity,
-  ArrowUp, ArrowDown, Minus, Zap, ExternalLink
+  ArrowUp, ArrowDown, Minus, Zap, ExternalLink, Archive,
+  MoreVertical, Edit2, Copy
 } from 'lucide-react';
+import { ActionMenu, ActionMenuItem } from '@/components/ui/ActionMenu';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { UndoToast, useUndoToast } from '@/components/ui/UndoToast';
+import { CUDStatusBadge, CUDStatus } from '@/components/ui/CUDStatusBadge';
 
 interface Project {
   id: string;
@@ -16,6 +21,7 @@ interface Project {
   description: string | null;
   type: string | null;
   tier: string;
+  status?: CUDStatus;
   lastAnalysis?: {
     score: number | null;
     status: string;
@@ -31,17 +37,29 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [showArchivedProjects, setShowArchivedProjects] = useState(false);
+  
+  // CUD 상태
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [archiving, setArchiving] = useState(false);
+
+  // Undo Toast
+  const undoToast = useUndoToast();
 
   useEffect(() => {
     fetchProjects();
-  }, []);
+  }, [showArchivedProjects]);
 
   async function fetchProjects() {
     try {
-      const res = await fetch('/api/projects');
+      const res = await fetch(`/api/projects${showArchivedProjects ? '?includeArchived=true' : ''}`);
       if (res.ok) {
         const data = await res.json();
-        setProjects(data);
+        setProjects(data.map((p: Project) => ({
+          ...p,
+          status: p.status || 'active'
+        })));
       }
     } catch (e) {
       console.error('Failed to fetch projects', e);
@@ -70,6 +88,112 @@ export default function ProjectsPage() {
     }
   }
 
+  // 프로젝트 아카이브
+  async function archiveProject(project: Project) {
+    setArchiving(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/archive`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        // 성공 시 목록에서 제거하고 Undo 토스트 표시
+        setProjects(prev => prev.filter(p => p.id !== project.id));
+        undoToast.show({
+          message: `"${project.name}" 프로젝트가 아카이브되었습니다`,
+          description: '30일 후 자동 삭제됩니다',
+          variant: 'default',
+          onUndo: async () => {
+            // 아카이브 취소
+            await fetch(`/api/projects/${project.id}/restore`, { method: 'POST' });
+            fetchProjects();
+          }
+        });
+      }
+    } catch (e) {
+      console.error('Failed to archive project', e);
+    } finally {
+      setArchiving(false);
+      setDeleteDialogOpen(false);
+      setProjectToDelete(null);
+    }
+  }
+
+  // 프로젝트 완전 삭제
+  async function deleteProject(project: Project) {
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setProjects(prev => prev.filter(p => p.id !== project.id));
+      }
+    } catch (e) {
+      console.error('Failed to delete project', e);
+    } finally {
+      setDeleteDialogOpen(false);
+      setProjectToDelete(null);
+    }
+  }
+
+  // 프로젝트 복사
+  async function duplicateProject(project: Project) {
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: `${project.name} (복사본)`,
+          description: project.description,
+          path: project.path,
+          type: project.type
+        })
+      });
+      if (res.ok) {
+        fetchProjects();
+      }
+    } catch (e) {
+      console.error('Failed to duplicate project', e);
+    }
+  }
+
+  // 프로젝트별 액션 메뉴 생성
+  function getProjectActions(project: Project): ActionMenuItem[] {
+    return [
+      {
+        id: 'edit',
+        label: '설정 편집',
+        icon: <Settings className="w-4 h-4" />,
+        onClick: () => window.location.href = `/dashboard/projects/${project.id}/settings`
+      },
+      {
+        id: 'duplicate',
+        label: '프로젝트 복사',
+        icon: <Copy className="w-4 h-4" />,
+        onClick: () => duplicateProject(project)
+      },
+      { id: 'divider1', label: '', divider: true },
+      {
+        id: 'archive',
+        label: '아카이브',
+        icon: <Archive className="w-4 h-4" />,
+        onClick: () => {
+          setProjectToDelete(project);
+          setDeleteDialogOpen(true);
+        }
+      },
+      {
+        id: 'delete',
+        label: '완전 삭제',
+        icon: <Trash2 className="w-4 h-4" />,
+        danger: true,
+        onClick: () => {
+          setProjectToDelete(project);
+          setDeleteDialogOpen(true);
+        }
+      }
+    ];
+  }
+
   const filteredProjects = projects.filter(p => 
     p.name.toLowerCase().includes(search.toLowerCase()) ||
     p.path.toLowerCase().includes(search.toLowerCase())
@@ -93,7 +217,7 @@ export default function ProjectsPage() {
         </div>
         <Link 
           href="/dashboard/projects/new"
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors shadow-lg shadow-blue-500/25"
         >
           <Plus className="w-5 h-5" />
           새 프로젝트
@@ -123,7 +247,7 @@ export default function ProjectsPage() {
 
       {/* Search & Filter */}
       {projects.length > 0 && (
-        <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between gap-4">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
@@ -134,6 +258,15 @@ export default function ProjectsPage() {
               className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
+          <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showArchivedProjects}
+              onChange={(e) => setShowArchivedProjects(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            아카이브 포함
+          </label>
         </div>
       )}
 
@@ -141,15 +274,19 @@ export default function ProjectsPage() {
       {filteredProjects.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredProjects.map((project) => (
-            <Link 
+            <div 
               key={project.id}
-              href={`/dashboard/projects/${project.id}`}
-              className="group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-600 transition-all"
+              className={`group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden hover:shadow-lg hover:border-blue-300 dark:hover:border-blue-600 transition-all ${
+                project.status === 'archived' ? 'opacity-60' : ''
+              }`}
             >
               {/* Project Header */}
               <div className="p-5 border-b border-gray-100 dark:border-gray-700">
                 <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
+                  <Link 
+                    href={`/dashboard/projects/${project.id}`}
+                    className="flex items-center gap-3 flex-1 min-w-0"
+                  >
                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
                       project.type === 'NEXTJS' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' :
                       project.type === 'JAVA' ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600' :
@@ -158,11 +295,23 @@ export default function ProjectsPage() {
                     }`}>
                       <FolderGit2 className="w-5 h-5" />
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{project.name}</h3>
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors truncate">
+                        {project.name}
+                      </h3>
                       <p className="text-xs text-gray-500 truncate max-w-[180px]">{project.path}</p>
                     </div>
-                  </div>
+                  </Link>
+                  
+                  {/* Action Menu */}
+                  <ActionMenu items={getProjectActions(project)} />
+                </div>
+                
+                {/* Status Badge */}
+                <div className="flex items-center gap-2">
+                  {project.status && project.status !== 'active' && (
+                    <CUDStatusBadge status={project.status} size="sm" />
+                  )}
                   <span className={`px-2 py-0.5 text-xs rounded-full ${
                     project.tier === 'ENTERPRISE' 
                       ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
@@ -171,8 +320,9 @@ export default function ProjectsPage() {
                     {project.tier}
                   </span>
                 </div>
+                
                 {project.description && (
-                  <p className="text-sm text-gray-500 line-clamp-2">{project.description}</p>
+                  <p className="text-sm text-gray-500 line-clamp-2 mt-2">{project.description}</p>
                 )}
               </div>
 
@@ -254,8 +404,8 @@ export default function ProjectsPage() {
               <div className="p-4 flex items-center justify-between border-t border-gray-100 dark:border-gray-700">
                 <button
                   onClick={(e) => startAnalysis(project.id, e)}
-                  disabled={selectedProject === project.id}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm rounded-lg transition-colors"
+                  disabled={selectedProject === project.id || project.status === 'archived'}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white text-sm rounded-lg transition-colors"
                 >
                   {selectedProject === project.id ? (
                     <RefreshCw className="w-4 h-4 animate-spin" />
@@ -264,12 +414,15 @@ export default function ProjectsPage() {
                   )}
                   분석 시작
                 </button>
-                <div className="flex items-center gap-2 text-gray-400">
+                <Link 
+                  href={`/dashboard/projects/${project.id}`}
+                  className="flex items-center gap-2 text-gray-400 hover:text-blue-500 transition-colors"
+                >
                   <span className="text-xs">상세 보기</span>
-                  <ExternalLink className="w-4 h-4 group-hover:text-blue-500 transition-colors" />
-                </div>
+                  <ExternalLink className="w-4 h-4" />
+                </Link>
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       )}
@@ -281,6 +434,32 @@ export default function ProjectsPage() {
           <p className="text-gray-500">검색 결과가 없습니다</p>
         </div>
       )}
+
+      {/* Delete/Archive Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={deleteDialogOpen}
+        onClose={() => {
+          setDeleteDialogOpen(false);
+          setProjectToDelete(null);
+        }}
+        onConfirm={() => projectToDelete && deleteProject(projectToDelete)}
+        onArchive={() => projectToDelete && archiveProject(projectToDelete)}
+        title={`프로젝트 삭제`}
+        message={`"${projectToDelete?.name}" 프로젝트를 삭제하시겠습니까?`}
+        variant="danger"
+        showArchiveOption={true}
+        recoverable={true}
+        recoverableDays={30}
+        impactItems={[
+          { label: '분석 기록', count: projectToDelete?.lastAnalysis ? 1 : 0 },
+          { label: '관련 이슈', count: 0 }
+        ]}
+        confirmText="완전 삭제"
+        loading={archiving}
+      />
+
+      {/* Undo Toast */}
+      <undoToast.UndoToastComponent />
     </div>
   );
 }

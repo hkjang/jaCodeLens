@@ -6,8 +6,11 @@ import {
   Activity, Clock, CheckCircle, XCircle, PlayCircle,
   FolderGit2, ChevronDown, Zap, AlertTriangle, 
   RefreshCw, ArrowRight, Settings, BarChart3,
-  FileCode, Shield, Layers, TestTube, BookOpen
+  FileCode, Shield, Layers, TestTube, BookOpen,
+  Pause, Square, Calendar, RotateCcw, Timer
 } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { UndoToast, useUndoToast } from '@/components/ui/UndoToast';
 
 interface Project {
   id: string;
@@ -47,6 +50,8 @@ const STAGE_INFO: Record<string, { name: string; icon: React.ReactNode; color: s
   AI_ENHANCE: { name: 'AI 보강', icon: <Zap className="w-4 h-4" />, color: 'text-yellow-500' }
 };
 
+type ExecutionMode = 'immediate' | 'scheduled';
+
 export default function ExecutionPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [executions, setExecutions] = useState<Execution[]>([]);
@@ -54,11 +59,24 @@ export default function ExecutionPage() {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
+  
+  // 실행 모드 (즉시/예약)
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>('immediate');
+  const [scheduledTime, setScheduledTime] = useState('');
+  
+  // CUD 상태
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [executionToCancel, setExecutionToCancel] = useState<Execution | null>(null);
+  const [keepResults, setKeepResults] = useState(true);
+  
   const [options, setOptions] = useState({
     enableAI: true,
     deepScan: false,
     includeTests: true
   });
+
+  // Undo Toast
+  const undoToast = useUndoToast();
 
   useEffect(() => {
     loadData();
@@ -108,7 +126,9 @@ export default function ExecutionPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           projectId: selectedProject,
-          options 
+          options,
+          mode: executionMode,
+          scheduledTime: executionMode === 'scheduled' ? scheduledTime : undefined
         })
       });
       if (res.ok) {
@@ -121,8 +141,77 @@ export default function ExecutionPage() {
     }
   }
 
+  // 분석 일시정지
+  async function pauseExecution(executionId: string) {
+    try {
+      const res = await fetch('/api/analysis/pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ executionId })
+      });
+      if (res.ok) {
+        await loadExecutions();
+        undoToast.show({
+          message: '분석이 일시정지되었습니다',
+          variant: 'default',
+          onUndo: () => resumeExecution(executionId)
+        });
+      }
+    } catch (e) {
+      console.error('Failed to pause execution', e);
+    }
+  }
+
+  // 분석 재개
+  async function resumeExecution(executionId: string) {
+    try {
+      const res = await fetch('/api/analysis/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ executionId })
+      });
+      if (res.ok) {
+        await loadExecutions();
+      }
+    } catch (e) {
+      console.error('Failed to resume execution', e);
+    }
+  }
+
+  // 분석 취소 (안전 종료)
+  async function cancelExecution(execution: Execution) {
+    try {
+      const res = await fetch('/api/analysis/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          executionId: execution.id,
+          keepResults
+        })
+      });
+      if (res.ok) {
+        await loadExecutions();
+        setShowCancelDialog(false);
+        setExecutionToCancel(null);
+      }
+    } catch (e) {
+      console.error('Failed to cancel execution', e);
+    }
+  }
+
+  // 예상 시간 계산 (더미)
+  function getEstimatedTime(): string {
+    let minutes = 5;
+    if (options.deepScan) minutes += 10;
+    if (options.enableAI) minutes += 3;
+    if (options.includeTests) minutes += 2;
+    return `약 ${minutes}분`;
+  }
+
   const latestExecution = executions[0];
   const selectedProjectInfo = projects.find(p => p.id === selectedProject);
+  const isRunning = latestExecution?.status === 'RUNNING';
+  const isPaused = latestExecution?.status === 'PAUSED';
 
   if (loading) {
     return (
@@ -145,6 +234,48 @@ export default function ExecutionPage() {
       {/* Start Analysis Panel */}
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">새 분석 시작</h3>
+        
+        {/* 실행 모드 선택 */}
+        <div className="flex items-center gap-4 mb-6">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="executionMode"
+              checked={executionMode === 'immediate'}
+              onChange={() => setExecutionMode('immediate')}
+              className="text-blue-600 focus:ring-blue-500"
+            />
+            <PlayCircle className="w-4 h-4 text-blue-500" />
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">즉시 실행</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="executionMode"
+              checked={executionMode === 'scheduled'}
+              onChange={() => setExecutionMode('scheduled')}
+              className="text-blue-600 focus:ring-blue-500"
+            />
+            <Calendar className="w-4 h-4 text-purple-500" />
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">예약 실행</span>
+          </label>
+        </div>
+
+        {/* 예약 시간 선택 */}
+        {executionMode === 'scheduled' && (
+          <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+            <label className="block text-sm font-medium text-purple-700 dark:text-purple-300 mb-2">
+              실행 예약 시간
+            </label>
+            <input
+              type="datetime-local"
+              value={scheduledTime}
+              onChange={(e) => setScheduledTime(e.target.value)}
+              min={new Date().toISOString().slice(0, 16)}
+              className="px-4 py-2 border border-purple-200 dark:border-purple-700 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+        )}
         
         <div className="grid md:grid-cols-3 gap-6">
           {/* Project Selector */}
@@ -182,17 +313,28 @@ export default function ExecutionPage() {
             )}
           </div>
 
-          {/* Start Button */}
-          <div className="flex flex-col justify-end">
+          {/* Start Button & Estimated Time */}
+          <div className="flex flex-col justify-end gap-2">
+            {/* 예상 시간 */}
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <Timer className="w-4 h-4" />
+              <span>예상 소요: {getEstimatedTime()}</span>
+            </div>
+            
             <button
               onClick={startAnalysis}
-              disabled={!selectedProject || starting}
+              disabled={!selectedProject || starting || (executionMode === 'scheduled' && !scheduledTime)}
               className="flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-700 hover:to-cyan-600 disabled:from-gray-400 disabled:to-gray-500 text-white font-semibold rounded-lg shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 disabled:shadow-none transition-all"
             >
               {starting ? (
                 <>
                   <RefreshCw className="w-5 h-5 animate-spin" />
                   시작 중...
+                </>
+              ) : executionMode === 'scheduled' ? (
+                <>
+                  <Calendar className="w-5 h-5" />
+                  예약 등록
                 </>
               ) : (
                 <>
@@ -274,18 +416,64 @@ export default function ExecutionPage() {
                   </p>
                 </div>
               </div>
-              {latestExecution.score !== null && (
-                <div className="text-right">
-                  <div className={`text-3xl font-bold ${
-                    latestExecution.score >= 80 ? 'text-green-500' :
-                    latestExecution.score >= 60 ? 'text-yellow-500' :
-                    'text-red-500'
-                  }`}>
-                    {latestExecution.score}
+              
+              {/* 실행 제어 버튼 */}
+              <div className="flex items-center gap-2">
+                {isRunning && (
+                  <>
+                    <button
+                      onClick={() => pauseExecution(latestExecution.id)}
+                      className="flex items-center gap-2 px-3 py-2 bg-yellow-100 hover:bg-yellow-200 dark:bg-yellow-900/30 dark:hover:bg-yellow-900/50 text-yellow-700 dark:text-yellow-400 rounded-lg transition-colors"
+                    >
+                      <Pause className="w-4 h-4" />
+                      일시정지
+                    </button>
+                    <button
+                      onClick={() => {
+                        setExecutionToCancel(latestExecution);
+                        setShowCancelDialog(true);
+                      }}
+                      className="flex items-center gap-2 px-3 py-2 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-700 dark:text-red-400 rounded-lg transition-colors"
+                    >
+                      <Square className="w-4 h-4" />
+                      중단
+                    </button>
+                  </>
+                )}
+                {isPaused && (
+                  <>
+                    <button
+                      onClick={() => resumeExecution(latestExecution.id)}
+                      className="flex items-center gap-2 px-3 py-2 bg-green-100 hover:bg-green-200 dark:bg-green-900/30 dark:hover:bg-green-900/50 text-green-700 dark:text-green-400 rounded-lg transition-colors"
+                    >
+                      <PlayCircle className="w-4 h-4" />
+                      재개
+                    </button>
+                    <button
+                      onClick={() => {
+                        setExecutionToCancel(latestExecution);
+                        setShowCancelDialog(true);
+                      }}
+                      className="flex items-center gap-2 px-3 py-2 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-700 dark:text-red-400 rounded-lg transition-colors"
+                    >
+                      <Square className="w-4 h-4" />
+                      중단
+                    </button>
+                  </>
+                )}
+                {latestExecution.score !== null && (
+                  <div className="text-right ml-4">
+                    <div className={`text-3xl font-bold ${
+                      latestExecution.score >= 80 ? 'text-green-500' :
+                      latestExecution.score >= 60 ? 'text-yellow-500' :
+                      'text-red-500'
+                    }`}>
+                      {latestExecution.score}
+                    </div>
+                    <p className="text-sm text-gray-500">분석 점수</p>
                   </div>
-                  <p className="text-sm text-gray-500">분석 점수</p>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
 
@@ -304,11 +492,13 @@ export default function ExecutionPage() {
                       <div className={`w-12 h-12 mx-auto rounded-xl flex items-center justify-center mb-2 transition-all ${
                         status === 'completed' ? 'bg-green-100 dark:bg-green-900/30 text-green-600' :
                         status === 'running' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 animate-pulse' :
+                        status === 'paused' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600' :
                         status === 'failed' ? 'bg-red-100 dark:bg-red-900/30 text-red-600' :
                         'bg-gray-100 dark:bg-gray-700 text-gray-400'
                       }`}>
                         {status === 'completed' ? <CheckCircle className="w-5 h-5" /> :
                          status === 'running' ? <RefreshCw className="w-5 h-5 animate-spin" /> :
+                         status === 'paused' ? <Pause className="w-5 h-5" /> :
                          status === 'failed' ? <XCircle className="w-5 h-5" /> :
                          info.icon}
                       </div>
@@ -335,7 +525,11 @@ export default function ExecutionPage() {
                 </div>
                 <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                   <div 
-                    className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 transition-all duration-500"
+                    className={`h-full transition-all duration-500 ${
+                      isPaused 
+                        ? 'bg-yellow-500' 
+                        : 'bg-gradient-to-r from-blue-500 to-cyan-500'
+                    }`}
                     style={{ 
                       width: `${(latestExecution.pipelineStages.filter(s => s.status === 'completed').length / Object.keys(STAGE_INFO).length) * 100}%` 
                     }}
@@ -392,8 +586,14 @@ export default function ExecutionPage() {
       {/* Recent Executions */}
       {executions.length > 1 && (
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-          <div className="p-4 border-b border-gray-100 dark:border-gray-700">
+          <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
             <h3 className="font-semibold text-gray-900 dark:text-white">최근 실행 기록</h3>
+            <Link 
+              href="/dashboard/history"
+              className="text-sm text-blue-600 hover:text-blue-700"
+            >
+              전체 보기
+            </Link>
           </div>
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
             {executions.slice(1, 6).map((exec) => (
@@ -420,12 +620,41 @@ export default function ExecutionPage() {
                       {exec.score}
                     </span>
                   )}
+                  {/* 재실행 버튼 */}
+                  <button
+                    onClick={() => {
+                      setSelectedProject(exec.projectId);
+                      startAnalysis();
+                    }}
+                    className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                    title="재실행"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             ))}
           </div>
         </div>
       )}
+
+      {/* 취소 확인 다이얼로그 */}
+      <ConfirmDialog
+        isOpen={showCancelDialog}
+        onClose={() => {
+          setShowCancelDialog(false);
+          setExecutionToCancel(null);
+        }}
+        onConfirm={() => executionToCancel && cancelExecution(executionToCancel)}
+        title="분석 중단"
+        message={`진행 중인 분석을 중단하시겠습니까?${keepResults ? ' (현재까지의 결과는 유지됩니다)' : ''}`}
+        variant="warning"
+        recoverable={false}
+        confirmText="중단"
+      />
+
+      {/* Undo Toast */}
+      <undoToast.UndoToastComponent />
     </div>
   );
 }
@@ -434,8 +663,10 @@ function StatusBadge({ status }: { status: string }) {
   const configs: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
     PENDING: { label: '대기 중', color: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400', icon: <Clock className="w-4 h-4" /> },
     RUNNING: { label: '실행 중', color: 'bg-blue-100 text-blue-600 dark:bg-blue-900/30', icon: <RefreshCw className="w-4 h-4 animate-spin" /> },
+    PAUSED: { label: '일시정지', color: 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30', icon: <Pause className="w-4 h-4" /> },
     COMPLETED: { label: '완료', color: 'bg-green-100 text-green-600 dark:bg-green-900/30', icon: <CheckCircle className="w-4 h-4" /> },
-    FAILED: { label: '실패', color: 'bg-red-100 text-red-600 dark:bg-red-900/30', icon: <XCircle className="w-4 h-4" /> }
+    FAILED: { label: '실패', color: 'bg-red-100 text-red-600 dark:bg-red-900/30', icon: <XCircle className="w-4 h-4" /> },
+    CANCELLED: { label: '취소됨', color: 'bg-gray-100 text-gray-600 dark:bg-gray-700', icon: <Square className="w-4 h-4" /> }
   };
   const config = configs[status] || configs.PENDING;
 
@@ -455,6 +686,10 @@ function StatusIcon({ status }: { status: string }) {
       return <XCircle className="w-5 h-5 text-red-500" />;
     case 'RUNNING':
       return <RefreshCw className="w-5 h-5 text-blue-500 animate-spin" />;
+    case 'PAUSED':
+      return <Pause className="w-5 h-5 text-yellow-500" />;
+    case 'CANCELLED':
+      return <Square className="w-5 h-5 text-gray-500" />;
     default:
       return <Clock className="w-5 h-5 text-gray-400" />;
   }
