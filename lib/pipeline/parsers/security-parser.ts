@@ -24,6 +24,14 @@ interface SecurityRule {
   filePatterns?: RegExp;  // 적용 대상 파일 패턴
 }
 
+// 분석에서 제외할 파일 패턴 (룰 정의 파일 자체는 분석하지 않음)
+const EXCLUDED_FILE_PATTERNS = [
+  /lib[\/\\]pipeline[\/\\]parsers[\/\\]/,  // Parser definition files
+  /__tests__[\/\\]/,                        // Test files
+  /\.test\.(ts|tsx|js|jsx)$/,               // Test file extensions
+  /\.spec\.(ts|tsx|js|jsx)$/,               // Spec file extensions
+];
+
 // 보안 룰 정의
 const SECURITY_RULES: SecurityRule[] = [
   // 하드코딩된 시크릿
@@ -221,6 +229,11 @@ export class SecurityParser {
     const violations: RuleViolation[] = [];
     
     if (!file.content) return violations;
+
+    // 제외 패턴 체크 - 룰 정의 파일, 테스트 파일은 분석 제외
+    if (EXCLUDED_FILE_PATTERNS.some(pattern => pattern.test(file.path))) {
+      return violations;
+    }
 
     const lines = file.content.split('\n');
 

@@ -40,7 +40,14 @@ import { SecurityAdvisor } from './ai/security-advisor';
 const DEFAULT_CONFIG: PipelineConfig = {
   shallowClone: false,
   maxFileSize: 1024 * 1024,  // 1MB
-  excludePatterns: ['node_modules/**', '.git/**', 'dist/**'],
+  excludePatterns: [
+    'node_modules/**', 
+    '.git/**', 
+    'dist/**', 
+    '.next/**',
+    '**/__tests__/**',
+    '**/lib/pipeline/parsers/**',  // Exclude parser rule definitions to prevent false positives
+  ],
   enableCaching: true,
   complexityThreshold: 15,
   maxFileLengthLines: 300,
