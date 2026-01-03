@@ -845,16 +845,35 @@ export default function ProjectCodeElementsPage() {
           비교 {compareMode && compareElements.length > 0 && `(${compareElements.length}/2)`}
         </button>
 
-        <div className="flex-1 relative min-w-[200px]">
+        <div className="flex-1 relative min-w-[200px] group">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
           <input
             type="text"
             placeholder="검색... (Ctrl+F)"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && loadData()}
+            onKeyDown={(e) => { if (e.key === 'Enter') { addSearchHistory(searchQuery); loadData(); } }}
             className="w-full pl-10 pr-4 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
           />
+          {/* 검색 기록 드롭다운 */}
+          {searchHistory.length > 0 && (
+            <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 opacity-0 invisible group-focus-within:opacity-100 group-focus-within:visible transition-all z-20 max-h-48 overflow-y-auto">
+              <div className="px-3 py-2 text-xs text-gray-500 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <span>최근 검색</span>
+                <button onClick={() => { setSearchHistory([]); localStorage.removeItem(`search-history-${projectId}`); }} className="text-red-500 hover:text-red-700">지우기</button>
+              </div>
+              {searchHistory.map((q, i) => (
+                <button
+                  key={i}
+                  onClick={() => { setSearchQuery(q); loadData(); }}
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2"
+                >
+                  <Clock className="w-3 h-3 text-gray-400" />
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="px-3 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm">
@@ -1113,6 +1132,32 @@ export default function ProjectCodeElementsPage() {
                 {selectedElement.signature && (
                   <pre className="font-mono text-xs bg-gray-100 dark:bg-gray-900 p-2 rounded overflow-x-auto">{selectedElement.signature}</pre>
                 )}
+              </div>
+
+              {/* 관련 페이지 링크 */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-gray-500">관련:</span>
+                <Link 
+                  href={`/dashboard/projects/${projectId}/results`}
+                  className="text-xs px-2 py-1 bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 rounded hover:bg-blue-100 transition-colors flex items-center gap-1"
+                >
+                  <BarChart3 className="w-3 h-3" />
+                  분석 결과
+                </Link>
+                <Link 
+                  href={`/dashboard/projects/${projectId}/history/trends`}
+                  className="text-xs px-2 py-1 bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400 rounded hover:bg-green-100 transition-colors flex items-center gap-1"
+                >
+                  <TrendingUp className="w-3 h-3" />
+                  히스토리
+                </Link>
+                <button 
+                  onClick={() => { setCompareMode(true); toggleCompareElement(selectedElement); }}
+                  className="text-xs px-2 py-1 bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400 rounded hover:bg-purple-100 transition-colors flex items-center gap-1"
+                >
+                  <GitBranch className="w-3 h-3" />
+                  비교에 추가
+                </button>
               </div>
 
               {selectedElement.aiSummary && (
