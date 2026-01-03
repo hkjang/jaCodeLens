@@ -24,8 +24,9 @@ import {
   AlertTriangle, TrendingUp, GitBranch, Clock, FolderTree,
   PieChart, Activity, Star, StarOff, Copy, ExternalLink,
   Download, ChevronUp, SortAsc, SortDesc, Keyboard, FileJson,
-  Table, X, Maximize2, Minimize2
+  Table, X, Maximize2, Minimize2, FileText
 } from 'lucide-react';
+import DependencyGraph from '@/components/code-elements/DependencyGraph';
 
 interface CodeElement {
   id: string;
@@ -75,7 +76,7 @@ export default function ProjectCodeElementsPage() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   // 뷰 모드
-  const [viewMode, setViewMode] = useState<'list' | 'tree' | 'complexity'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'tree' | 'complexity' | 'graph'>('list');
   const [showCodePreview, setShowCodePreview] = useState(false);
   const [codePreviewFullscreen, setCodePreviewFullscreen] = useState(false);
 
@@ -126,6 +127,7 @@ export default function ProjectCodeElementsPage() {
         if (e.key === '1') setViewMode('list');
         if (e.key === '2') setViewMode('tree');
         if (e.key === '3') setViewMode('complexity');
+        if (e.key === '4') setViewMode('graph');
       }
     }
     window.addEventListener('keydown', handleKeyDown);
@@ -601,6 +603,7 @@ export default function ProjectCodeElementsPage() {
             { mode: 'list' as const, label: '목록', key: '1' },
             { mode: 'tree' as const, label: '트리', key: '2' },
             { mode: 'complexity' as const, label: '복잡도', key: '3' },
+            { mode: 'graph' as const, label: '그래프', key: '4' },
           ].map(({ mode, label, key }) => (
             <button
               key={mode}
@@ -702,6 +705,12 @@ export default function ProjectCodeElementsPage() {
                 );
               })}
             </div>
+          ) : viewMode === 'graph' ? (
+            <DependencyGraph 
+              elements={filteredElements} 
+              onSelectElement={(el: any) => setSelectedElement(el as CodeElement)}
+              selectedId={selectedElement?.id}
+            />
           ) : filteredElements.length > 0 ? (
             <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
               {filteredElements.map(el => (
