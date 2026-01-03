@@ -6,10 +6,10 @@ export const dynamic = 'force-dynamic';
 // GET /api/projects/[id]/health - Get project health dashboard data
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const projectId = params.id;
+    const { id: projectId } = await params;
 
     // Get project
     const project = await prisma.project.findUnique({
@@ -43,7 +43,7 @@ export async function GET(
     };
 
     results.forEach(r => {
-      const cat = r.category?.toLowerCase() || 'quality';
+      const cat = r.mainCategory?.toLowerCase() || 'quality';
       const key = cat === 'security' ? 'security' :
                   cat === 'quality' || cat === 'standards' ? 'quality' :
                   cat === 'structure' ? 'structure' :
@@ -90,7 +90,7 @@ export async function GET(
       .map(r => ({
         id: r.id,
         severity: r.severity,
-        category: r.category || 'QUALITY',
+        category: r.mainCategory || 'QUALITY',
         message: r.message,
         file: r.filePath?.split('/').pop() || 'unknown',
         impact: r.severity === 'CRITICAL' 
