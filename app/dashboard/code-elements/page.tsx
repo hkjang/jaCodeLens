@@ -6,7 +6,8 @@ import {
   FileCode, Folder, Clock, Zap, GitBranch, Tag, 
   CheckCircle, AlertCircle, Loader2, Eye, Play,
   BarChart3, PieChart, TrendingUp, Layers,
-  Download, Copy, Sparkles, ArrowUp, ArrowDown, RotateCw
+  Download, Copy, Sparkles, ArrowUp, ArrowDown, RotateCw,
+  HelpCircle, Info, BookOpen, Lightbulb, MessageCircle
 } from 'lucide-react';
 
 interface CodeElement {
@@ -106,6 +107,80 @@ export default function CodeElementsPage() {
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const [splitView, setSplitView] = useState(false);
   const [showMarkdownExport, setShowMarkdownExport] = useState(false);
+
+  // 가이드 & 툴팁 상태
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const [showDataSourceInfo, setShowDataSourceInfo] = useState(false);
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
+  const [dismissedTips, setDismissedTips] = useState<string[]>([]);
+
+  // 온보딩 가이드 데이터
+  const onboardingSteps = [
+    { title: '👋 코드 요소 분석기에 오신 것을 환영합니다!', content: '이 도구는 프로젝트의 코드를 AST(추상 구문 트리)로 파싱하여 함수, 클래스, 컴포넌트 등을 추출하고 분석합니다.' },
+    { title: '🔍 1단계: 스캔 실행', content: '"스캔 실행" 버튼을 클릭하면 프로젝트의 TypeScript/JavaScript 파일을 분석하여 코드 요소를 추출합니다.' },
+    { title: '⚡ 2단계: AI 분석', content: '"AI 분석" 버튼으로 각 요소에 대한 AI 기반 요약, 목적, 개선점 분석을 수행합니다.' },
+    { title: '📊 3단계: 탐색 & 관리', content: '필터, 정렬, 검색, 즐겨찾기, 태그 등을 사용하여 코드 요소를 효율적으로 관리하세요.' },
+    { title: '🎯 완료!', content: '이제 코드 분석을 시작할 준비가 되었습니다. 도움이 필요하면 ⓘ 아이콘을 클릭하세요.' }
+  ];
+
+  // 첫 방문 체크
+  useEffect(() => {
+    const visited = localStorage.getItem('code-elements-visited');
+    if (!visited) {
+      setShowOnboarding(true);
+      localStorage.setItem('code-elements-visited', 'true');
+    }
+    const dismissed = localStorage.getItem('code-elements-dismissed-tips');
+    if (dismissed) {
+      try { setDismissedTips(JSON.parse(dismissed)); } catch {}
+    }
+  }, []);
+
+  const dismissTip = (tipId: string) => {
+    setDismissedTips(prev => {
+      const next = [...prev, tipId];
+      localStorage.setItem('code-elements-dismissed-tips', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  // 툴팁 컴포넌트
+  const Tooltip = ({ id, children, content }: { id: string; children: React.ReactNode; content: string }) => (
+    <div className="relative inline-flex items-center">
+      {children}
+      <button
+        onClick={() => setActiveTooltip(activeTooltip === id ? null : id)}
+        className="ml-1 text-gray-400 hover:text-violet-500 transition"
+      >
+        <HelpCircle className="w-4 h-4" />
+      </button>
+      {activeTooltip === id && (
+        <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 z-50 w-64 p-3 bg-gray-900 text-white text-sm rounded-lg shadow-xl">
+          <div className="absolute -left-2 top-1/2 -translate-y-1/2 border-8 border-transparent border-r-gray-900" />
+          {content}
+          <button onClick={() => setActiveTooltip(null)} className="absolute top-1 right-1 text-gray-400 hover:text-white">✕</button>
+        </div>
+      )}
+    </div>
+  );
+
+  // 인포 배지 컴포넌트
+  const InfoBadge = ({ tipId, title, content }: { tipId: string; title: string; content: string }) => {
+    if (dismissedTips.includes(tipId)) return null;
+    return (
+      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-4">
+        <div className="flex items-start gap-2">
+          <Lightbulb className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-blue-700 dark:text-blue-300">{title}</p>
+            <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">{content}</p>
+          </div>
+          <button onClick={() => dismissTip(tipId)} className="text-blue-400 hover:text-blue-600 text-xs">닫기</button>
+        </div>
+      </div>
+    );
+  };
 
   // 프로젝트 ID 가져오기
   useEffect(() => {
@@ -1087,6 +1162,147 @@ export default function CodeElementsPage() {
               className="mt-4 w-full py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition"
             >
               닫기
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Onboarding Modal */}
+      {showOnboarding && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden">
+            {/* Progress Bar */}
+            <div className="h-1 bg-gray-200 dark:bg-gray-700">
+              <div 
+                className="h-full bg-gradient-to-r from-violet-500 to-purple-600 transition-all duration-300"
+                style={{ width: `${((onboardingStep + 1) / onboardingSteps.length) * 100}%` }}
+              />
+            </div>
+            
+            <div className="p-8">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 mx-auto mb-4 flex items-center justify-center">
+                  <Code2 className="w-8 h-8 text-white" />
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                  {onboardingSteps[onboardingStep].title}
+                </h3>
+                <p className="text-gray-600 dark:text-gray-400 mt-3">
+                  {onboardingSteps[onboardingStep].content}
+                </p>
+              </div>
+              
+              {/* Step Indicators */}
+              <div className="flex justify-center gap-2 mb-6">
+                {onboardingSteps.map((_, idx) => (
+                  <div 
+                    key={idx}
+                    className={`w-2 h-2 rounded-full transition ${idx === onboardingStep ? 'bg-violet-500 w-6' : 'bg-gray-300 dark:bg-gray-600'}`}
+                  />
+                ))}
+              </div>
+              
+              <div className="flex gap-3">
+                {onboardingStep > 0 && (
+                  <button
+                    onClick={() => setOnboardingStep(prev => prev - 1)}
+                    className="flex-1 py-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition"
+                  >
+                    이전
+                  </button>
+                )}
+                {onboardingStep < onboardingSteps.length - 1 ? (
+                  <button
+                    onClick={() => setOnboardingStep(prev => prev + 1)}
+                    className="flex-1 py-3 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition"
+                  >
+                    다음
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setShowOnboarding(false)}
+                    className="flex-1 py-3 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-lg hover:from-violet-700 hover:to-purple-700 transition"
+                  >
+                    시작하기 🚀
+                  </button>
+                )}
+              </div>
+              
+              <button
+                onClick={() => setShowOnboarding(false)}
+                className="w-full mt-3 text-center text-sm text-gray-500 hover:text-gray-700"
+              >
+                건너뛰기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Data Source Info Modal */}
+      {showDataSourceInfo && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setShowDataSourceInfo(false)}>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-violet-500" />
+              데이터 소스 & 처리 흐름
+            </h3>
+            
+            <div className="space-y-4">
+              <div className="bg-violet-50 dark:bg-violet-900/20 rounded-lg p-4">
+                <h4 className="font-semibold text-violet-700 dark:text-violet-300 mb-2">📁 1. 스캔 실행</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  TypeScript AST 파서를 사용하여 프로젝트의 <code className="px-1 bg-gray-200 dark:bg-gray-700 rounded">.ts</code>, 
+                  <code className="px-1 bg-gray-200 dark:bg-gray-700 rounded">.tsx</code>, 
+                  <code className="px-1 bg-gray-200 dark:bg-gray-700 rounded">.js</code> 파일을 분석합니다.
+                </p>
+                <div className="mt-2 text-xs text-gray-500">
+                  📍 lib/code-scanner/index.ts
+                </div>
+              </div>
+              
+              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
+                <h4 className="font-semibold text-blue-700 dark:text-blue-300 mb-2">🔍 2. 요소 추출</h4>
+                <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                  <li>• <strong>FUNCTION</strong> - 일반 함수</li>
+                  <li>• <strong>CLASS</strong> - 클래스 정의</li>
+                  <li>• <strong>COMPONENT</strong> - React 컴포넌트</li>
+                  <li>• <strong>HOOK</strong> - React 커스텀 훅</li>
+                  <li>• <strong>INTERFACE</strong> - TypeScript 인터페이스</li>
+                  <li>• <strong>TYPE</strong> - TypeScript 타입 정의</li>
+                  <li>• <strong>METHOD</strong> - 클래스 메서드</li>
+                </ul>
+              </div>
+              
+              <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4">
+                <h4 className="font-semibold text-green-700 dark:text-green-300 mb-2">💾 3. DB 저장</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  추출된 요소는 <code className="px-1 bg-gray-200 dark:bg-gray-700 rounded">CodeElement</code> 모델로 
+                  PostgreSQL 데이터베이스에 저장됩니다.
+                </p>
+                <div className="mt-2 text-xs text-gray-500">
+                  📍 prisma/schema.prisma → CodeElement
+                </div>
+              </div>
+              
+              <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-4">
+                <h4 className="font-semibold text-orange-700 dark:text-orange-300 mb-2">⚡ 4. AI 분석 (선택)</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  각 요소의 코드를 AI에게 전송하여 요약, 목적, 개선점 등을 분석합니다.
+                  분석 결과는 <code className="px-1 bg-gray-200 dark:bg-gray-700 rounded">aiSummary</code>와 
+                  <code className="px-1 bg-gray-200 dark:bg-gray-700 rounded">aiAnalysis</code> 필드에 저장됩니다.
+                </p>
+                <div className="mt-2 text-xs text-gray-500">
+                  📍 lib/code-element-service.ts
+                </div>
+              </div>
+            </div>
+            
+            <button
+              onClick={() => setShowDataSourceInfo(false)}
+              className="mt-6 w-full py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition"
+            >
+              이해했습니다
             </button>
           </div>
         </div>
