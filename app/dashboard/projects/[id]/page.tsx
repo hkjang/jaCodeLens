@@ -638,15 +638,17 @@ export default function ProjectDetailPage() {
                   </div>
                   <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </Link>
-                <button
-                  className="w-full flex items-center gap-3 p-3 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
+                <Link
+                  href={`/dashboard/projects/${projectId}/results?category=${activeCategory.toUpperCase()}&assist=true`}
+                  className="w-full flex items-center gap-3 p-3 bg-white/20 hover:bg-white/30 rounded-lg transition-colors group"
                 >
                   <Wrench className="w-5 h-5" />
                   <div className="flex-1 text-left">
                     <p className="font-medium">자동 수정 제안</p>
                     <p className="text-xs text-white/60">AI 기반 코드 개선 제안</p>
                   </div>
-                </button>
+                  <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </Link>
               </div>
             </div>
           </div>
@@ -762,12 +764,13 @@ export default function ProjectDetailPage() {
                   </div>
                   <p className="text-xs text-gray-400 mt-1.5">{issue.impact}</p>
                 </div>
-                <button 
+                <Link 
+                  href={`/dashboard/projects/${projectId}/results?issue=${issue.id}&assist=true`}
                   className="shrink-0 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-medium rounded-lg shadow-sm hover:shadow-md transition-all opacity-80 group-hover:opacity-100"
                   onClick={(e) => e.stopPropagation()}
                 >
                   개선하기
-                </button>
+                </Link>
               </div>
             ))}
           </div>
