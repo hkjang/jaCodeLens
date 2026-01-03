@@ -827,6 +827,73 @@ export default function ProjectCodeElementsPage() {
         </div>
       )}
 
+      {/* 빠른 링크 카드 */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Link
+          href={`/dashboard/projects/${projectId}/results`}
+          className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-500 transition group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+              <BarChart3 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <div className="font-medium text-gray-900 dark:text-white">분석 결과</div>
+              <div className="text-sm text-gray-500">이슈 및 통계</div>
+            </div>
+          </div>
+          <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-500 transition" />
+        </Link>
+        
+        <Link
+          href={`/dashboard/projects/${projectId}/history/trends`}
+          className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-green-500 dark:hover:border-green-500 transition group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
+              <TrendingUp className="w-5 h-5 text-green-600 dark:text-green-400" />
+            </div>
+            <div>
+              <div className="font-medium text-gray-900 dark:text-white">트렌드</div>
+              <div className="text-sm text-gray-500">히스토리 추적</div>
+            </div>
+          </div>
+          <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-green-500 transition" />
+        </Link>
+
+        <button
+          onClick={() => setCompareMode(true)}
+          className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-purple-500 dark:hover:border-purple-500 transition group text-left"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
+              <GitBranch className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+            </div>
+            <div>
+              <div className="font-medium text-gray-900 dark:text-white">코드 비교</div>
+              <div className="text-sm text-gray-500">{compareElements.length}/2 선택됨</div>
+            </div>
+          </div>
+          <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-purple-500 transition" />
+        </button>
+
+        <button
+          onClick={() => setViewMode('favorites')}
+          className="flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-yellow-500 dark:hover:border-yellow-500 transition group text-left"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
+              <Star className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
+            </div>
+            <div>
+              <div className="font-medium text-gray-900 dark:text-white">즐겨찾기</div>
+              <div className="text-sm text-gray-500">{favorites.size}개 저장됨</div>
+            </div>
+          </div>
+          <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-yellow-500 transition" />
+        </button>
+      </div>
+
       {/* 통계 및 차트 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 통계 카드 */}
