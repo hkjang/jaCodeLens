@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, BarChart3, AlertCircle, AlertTriangle, Info, CheckCircle,
@@ -31,14 +31,19 @@ interface Stats {
 
 export default function ProjectResultsPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const projectId = params.id as string;
+
+  // URL 쿼리 파라미터로 초기 필터 값 설정
+  const initialSeverity = searchParams.get('severity') || '';
+  const initialCategory = searchParams.get('category') || '';
 
   const [project, setProject] = useState<{ id: string; name: string; path: string } | null>(null);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [severityFilter, setSeverityFilter] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
+  const [severityFilter, setSeverityFilter] = useState(initialSeverity);
+  const [categoryFilter, setCategoryFilter] = useState(initialCategory);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'grouped'>('list');
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
@@ -47,6 +52,7 @@ export default function ProjectResultsPage() {
   useEffect(() => {
     loadData();
   }, [projectId]);
+
 
   async function loadData() {
     setLoading(true);

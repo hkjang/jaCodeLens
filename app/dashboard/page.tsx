@@ -80,6 +80,7 @@ export default async function DashboardPage() {
           value={stats.totalIssues} 
           icon={<BarChart3 className="w-6 h-6 text-blue-500" />} 
           trend={`${stats.totalExecutions}회 분석 완료`}
+          href="/dashboard/results"
         />
         <StatCard 
           title="Critical" 
@@ -87,6 +88,7 @@ export default async function DashboardPage() {
           icon={<ShieldAlert className="w-6 h-6 text-red-500" />} 
           trend="즉시 조치 필요"
           isCritical={stats.criticalCount > 0}
+          href="/dashboard/results?severity=CRITICAL"
         />
         <StatCard 
           title="High" 
@@ -94,12 +96,14 @@ export default async function DashboardPage() {
           icon={<AlertTriangle className="w-6 h-6 text-orange-500" />} 
           trend="높은 우선순위"
           isWarning={stats.highCount > 0}
+          href="/dashboard/results?severity=HIGH"
         />
         <StatCard 
           title="분석 점수" 
           value={stats.averageScore || '-'} 
           icon={<TrendingUp className="w-6 h-6 text-green-500" />} 
           trend="최근 분석 기준"
+          href="/dashboard/execution"
         />
       </div>
 
@@ -113,10 +117,14 @@ export default async function DashboardPage() {
           <div className="space-y-3">
             {Object.entries(stats.byCategory).length > 0 ? (
               Object.entries(stats.byCategory).map(([category, count]) => (
-                <div key={category} className="flex items-center justify-between">
+                <Link 
+                  key={category} 
+                  href={`/dashboard/results?category=${category}`}
+                  className="flex items-center justify-between p-2 -mx-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors group"
+                >
                   <div className="flex items-center gap-2">
                     <CategoryIcon category={category} />
-                    <span className="text-gray-700 dark:text-gray-300">{getCategoryLabel(category)}</span>
+                    <span className="text-gray-700 dark:text-gray-300 group-hover:text-blue-600 dark:group-hover:text-blue-400">{getCategoryLabel(category)}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-24 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
@@ -128,8 +136,9 @@ export default async function DashboardPage() {
                     <span className="text-sm font-medium text-gray-600 dark:text-gray-400 w-8 text-right">
                       {count}
                     </span>
+                    <ChevronRight className="w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
-                </div>
+                </Link>
               ))
             ) : (
               <p className="text-gray-500 text-sm">분석 결과가 없습니다</p>
@@ -143,11 +152,11 @@ export default async function DashboardPage() {
             심각도별 분포
           </h3>
           <div className="grid grid-cols-5 gap-3">
-            <SeverityCard label="Critical" count={stats.criticalCount} color="bg-red-500" />
-            <SeverityCard label="High" count={stats.highCount} color="bg-orange-500" />
-            <SeverityCard label="Medium" count={stats.mediumCount} color="bg-yellow-500" />
-            <SeverityCard label="Low" count={stats.lowCount} color="bg-blue-500" />
-            <SeverityCard label="Info" count={stats.infoCount} color="bg-gray-400" />
+            <SeverityCard label="Critical" count={stats.criticalCount} color="bg-red-500" href="/dashboard/results?severity=CRITICAL" />
+            <SeverityCard label="High" count={stats.highCount} color="bg-orange-500" href="/dashboard/results?severity=HIGH" />
+            <SeverityCard label="Medium" count={stats.mediumCount} color="bg-yellow-500" href="/dashboard/results?severity=MEDIUM" />
+            <SeverityCard label="Low" count={stats.lowCount} color="bg-blue-500" href="/dashboard/results?severity=LOW" />
+            <SeverityCard label="Info" count={stats.infoCount} color="bg-gray-400" href="/dashboard/results?severity=INFO" />
           </div>
         </div>
       </div>
@@ -169,14 +178,15 @@ export default async function DashboardPage() {
         {executions.length > 0 ? (
           <div className="space-y-3">
             {executions.map((exec) => (
-              <div 
+              <Link 
                 key={exec.id}
-                className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg"
+                href={`/dashboard/analysis/${exec.id}`}
+                className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors group"
               >
                 <div className="flex items-center gap-3">
                   <StatusIcon status={exec.status} />
                   <div>
-                    <p className="font-medium text-gray-900 dark:text-white">
+                    <p className="font-medium text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
                       {exec.projectName}
                     </p>
                     <p className="text-xs text-gray-500">
@@ -199,8 +209,9 @@ export default async function DashboardPage() {
                       {exec.score}
                     </span>
                   )}
+                  <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-blue-500 transition-colors" />
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         ) : (
@@ -229,38 +240,42 @@ export default async function DashboardPage() {
   );
 }
 
-function StatCard({ title, value, icon, trend, isWarning, isCritical }: any) {
-  return (
-    <div className={`p-6 rounded-xl border shadow-sm transition-all hover:shadow-md bg-white dark:bg-gray-800 ${
-      isCritical ? 'border-red-200 bg-red-50/50 dark:bg-red-900/10' : 
-      isWarning ? 'border-orange-200 bg-orange-50/50 dark:bg-orange-900/10' :
-      'border-gray-100 dark:border-gray-700'
+function StatCard({ title, value, icon, trend, isWarning, isCritical, href }: any) {
+  const content = (
+    <div className={`p-6 rounded-xl border shadow-sm transition-all hover:shadow-md hover:scale-[1.02] cursor-pointer bg-white dark:bg-gray-800 ${
+      isCritical ? 'border-red-200 bg-red-50/50 dark:bg-red-900/10 hover:border-red-400' : 
+      isWarning ? 'border-orange-200 bg-orange-50/50 dark:bg-orange-900/10 hover:border-orange-400' :
+      'border-gray-100 dark:border-gray-700 hover:border-blue-300'
     }`}>
       <div className="flex items-center justify-between mb-4">
         <span className="text-gray-500 font-medium">{title}</span>
         {icon}
       </div>
       <div className="text-3xl font-bold text-gray-900 dark:text-white mb-1">{value}</div>
-      <div className={`text-sm ${
+      <div className={`text-sm flex items-center gap-1 ${
         isCritical ? 'text-red-600' : 
         isWarning ? 'text-orange-600' : 
         'text-gray-500'
       }`}>
         {trend}
+        <ChevronRight className="w-4 h-4 opacity-50" />
       </div>
     </div>
   );
+
+  return href ? <Link href={href}>{content}</Link> : content;
 }
 
-function SeverityCard({ label, count, color }: { label: string; count: number; color: string }) {
-  return (
-    <div className="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+function SeverityCard({ label, count, color, href }: { label: string; count: number; color: string; href?: string }) {
+  const content = (
+    <div className="text-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-600/50 transition-colors cursor-pointer hover:scale-105">
       <div className={`w-8 h-8 mx-auto rounded-lg ${color} flex items-center justify-center text-white font-bold mb-2`}>
         {count}
       </div>
       <p className="text-xs text-gray-500">{label}</p>
     </div>
   );
+  return href ? <Link href={href}>{content}</Link> : content;
 }
 
 function StatusIcon({ status }: { status: string }) {

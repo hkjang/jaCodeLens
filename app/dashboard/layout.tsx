@@ -26,7 +26,8 @@ import {
   FolderGit2,
   Plus,
   ChevronRight,
-  ExternalLink
+  ExternalLink,
+  Search
 } from 'lucide-react';
 import { useRole, UserRole, roleConfigs } from '@/lib/contexts/RoleContext';
 import QuickActions from '@/components/QuickActions';
@@ -42,6 +43,8 @@ const projectMenuItems = [
   { href: '', icon: <LayoutDashboard className="w-4 h-4" />, label: '대시보드' },
   { href: '/code-elements', icon: <Code2 className="w-4 h-4" />, label: '코드 요소' },
   { href: '/results', icon: <BarChart3 className="w-4 h-4" />, label: '분석 결과' },
+  { href: '/risks', icon: <AlertTriangle className="w-4 h-4" />, label: '리스크 맵' },
+  { href: '/architecture', icon: <Layers className="w-4 h-4" />, label: '아키텍처' },
   { href: '/history/trends', icon: <TrendingUp className="w-4 h-4" />, label: '히스토리' },
   { href: '/settings', icon: <Settings className="w-4 h-4" />, label: '설정' },
 ];
@@ -54,6 +57,15 @@ const globalMenuSections = [
     items: [
       { href: '/dashboard/projects', icon: <FolderGit2 className="w-4 h-4" />, label: '프로젝트 목록' },
       { href: '/dashboard/projects/new', icon: <Plus className="w-4 h-4" />, label: '새 프로젝트' },
+    ]
+  },
+  {
+    key: 'analysis',
+    title: '분석',
+    items: [
+      { href: '/dashboard/execution', icon: <PlayCircle className="w-4 h-4" />, label: '분석 실행' },
+      { href: '/dashboard/architecture', icon: <Layers className="w-4 h-4" />, label: '아키텍처' },
+      { href: '/dashboard/risks', icon: <AlertTriangle className="w-4 h-4" />, label: '리스크 맵' },
     ]
   },
   {
@@ -79,6 +91,7 @@ const globalMenuSections = [
     key: 'admin',
     title: '관리',
     items: [
+      { href: '/dashboard/audit', icon: <Shield className="w-4 h-4" />, label: '감사 로그' },
       { href: '/admin/models', icon: <Activity className="w-4 h-4" />, label: 'AI 모델' },
       { href: '/dashboard/settings', icon: <Settings className="w-4 h-4" />, label: '설정' },
     ]
@@ -99,6 +112,16 @@ export default function DashboardLayout({
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [projectSearch, setProjectSearch] = useState('');
+
+  // MSA 대응: 프로젝트 검색 필터링 (최대 30개 표시)
+  const filteredProjects = React.useMemo(() => {
+    const filtered = projects.filter(p =>
+      p.name.toLowerCase().includes(projectSearch.toLowerCase()) ||
+      (p.type && p.type.toLowerCase().includes(projectSearch.toLowerCase()))
+    );
+    return filtered.slice(0, 30);
+  }, [projects, projectSearch]);
 
   // 프로젝트 목록 로드
   useEffect(() => {
@@ -181,41 +204,73 @@ export default function DashboardLayout({
             </button>
             
             {projectMenuOpen && (
-              <div className="absolute top-full left-0 right-0 mt-1 py-2 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 z-50 max-h-64 overflow-y-auto">
-                {projects.length > 0 ? (
-                  <>
-                    {projects.map(project => (
-                      <button
-                        key={project.id}
-                        onClick={() => selectProject(project)}
-                        className={`w-full px-4 py-2.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-3 ${
-                          selectedProject?.id === project.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600' : 'text-gray-700 dark:text-gray-300'
-                        }`}
-                      >
-                        <FolderGit2 className="w-4 h-4" />
-                        <span className="truncate">{project.name}</span>
-                      </button>
-                    ))}
-                    <div className="border-t border-gray-200 dark:border-gray-700 mt-2 pt-2">
-                      <Link
-                        href="/dashboard/projects/new"
-                        onClick={() => setProjectMenuOpen(false)}
-                        className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-2"
-                      >
-                        <Plus className="w-4 h-4" />
-                        새 프로젝트 추가
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 z-50 overflow-hidden">
+                {/* 검색 필드 */}
+                <div className="p-2 border-b border-gray-200 dark:border-gray-700">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="프로젝트 검색..."
+                      value={projectSearch}
+                      onChange={e => setProjectSearch(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 text-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                <div className="max-h-64 overflow-y-auto">
+                  {projects.length > 0 ? (
+                    <>
+                      {filteredProjects.length > 0 ? (
+                        filteredProjects.map(project => (
+                          <button
+                            key={project.id}
+                            onClick={() => { selectProject(project); setProjectSearch(''); }}
+                            className={`w-full px-4 py-2.5 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-3 ${
+                              selectedProject?.id === project.id ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600' : 'text-gray-700 dark:text-gray-300'
+                            }`}
+                          >
+                            <FolderGit2 className="w-4 h-4 shrink-0" />
+                            <span className="truncate flex-1">{project.name}</span>
+                            {project.type && <span className="text-xs text-gray-400 shrink-0">{project.type}</span>}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-4 py-4 text-center text-gray-400 text-sm">
+                          "{projectSearch}" 검색 결과 없음
+                        </div>
+                      )}
+                      
+                      {/* MSA 안내 */}
+                      {projects.length > 30 && !projectSearch && (
+                        <div className="px-4 py-2 text-xs text-gray-400 text-center border-t border-gray-100 dark:border-gray-700">
+                          {projects.length - 30}개 프로젝트가 더 있습니다. 검색하세요.
+                        </div>
+                      )}
+                      
+                      <div className="border-t border-gray-200 dark:border-gray-700 p-2">
+                        <Link
+                          href="/dashboard/projects/new"
+                          onClick={() => { setProjectMenuOpen(false); setProjectSearch(''); }}
+                          className="w-full px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg flex items-center gap-2"
+                        >
+                          <Plus className="w-4 h-4" />
+                          새 프로젝트 추가
+                        </Link>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="px-4 py-6 text-center text-gray-400 text-sm">
+                      <FolderGit2 className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      프로젝트가 없습니다
+                      <Link href="/dashboard/projects/new" className="block mt-2 text-blue-600 hover:underline">
+                        첫 프로젝트 만들기
                       </Link>
                     </div>
-                  </>
-                ) : (
-                  <div className="px-4 py-6 text-center text-gray-400 text-sm">
-                    <FolderGit2 className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                    프로젝트가 없습니다
-                    <Link href="/dashboard/projects/new" className="block mt-2 text-blue-600 hover:underline">
-                      첫 프로젝트 만들기
-                    </Link>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             )}
           </div>

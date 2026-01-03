@@ -76,84 +76,35 @@ export default function AuditPage() {
 
   async function fetchLogs() {
     setLoading(true);
-    // 더미 데이터 (실제로는 API에서 가져옴)
-    const dummyLogs: AuditLog[] = [
-      {
-        id: '1',
-        action: 'CREATE',
-        entity: 'PROJECT',
-        entityId: 'proj-1',
-        entityName: 'My New Project',
-        userId: 'user-1',
-        userName: '관리자',
-        userRole: 'admin',
-        timestamp: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-        ipAddress: '192.168.1.100',
-        details: {
-          after: { name: 'My New Project', path: '/home/project' }
-        }
-      },
-      {
-        id: '2',
-        action: 'UPDATE',
-        entity: 'RULE',
-        entityId: 'rule-1',
-        entityName: 'SQL Injection 감지',
-        userId: 'user-2',
-        userName: '아키텍트',
-        userRole: 'architect',
-        timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-        ipAddress: '192.168.1.101',
-        details: {
-          before: { severity: 'HIGH' },
-          after: { severity: 'CRITICAL' },
-          changes: ['severity']
-        }
-      },
-      {
-        id: '3',
-        action: 'DELETE',
-        entity: 'TASK',
-        entityId: 'task-1',
-        entityName: 'console.log 제거',
-        userId: 'user-1',
-        userName: '관리자',
-        userRole: 'admin',
-        timestamp: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-        ipAddress: '192.168.1.100',
-        details: {
-          before: { status: 'TODO', priority: 'LOW' }
-        }
-      },
-      {
-        id: '4',
-        action: 'ARCHIVE',
-        entity: 'PROJECT',
-        entityId: 'proj-2',
-        entityName: 'Legacy Project',
-        userId: 'user-1',
-        userName: '관리자',
-        userRole: 'admin',
-        timestamp: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-        ipAddress: '192.168.1.100'
-      },
-      {
-        id: '5',
-        action: 'CREATE',
-        entity: 'EXECUTION',
-        entityId: 'exec-1',
-        entityName: '분석 실행 #123',
-        userId: 'user-3',
-        userName: '운영자',
-        userRole: 'operator',
-        timestamp: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
-        ipAddress: '192.168.1.102'
+    try {
+      // 실제 API 호출
+      const params = new URLSearchParams();
+      params.set('page', page.toString());
+      params.set('pageSize', pageSize.toString());
+      if (actionFilter) params.set('action', actionFilter);
+      if (entityFilter) params.set('targetType', entityFilter);
+      if (dateFrom) params.set('dateFrom', dateFrom);
+      if (dateTo) params.set('dateTo', dateTo);
+      if (search) params.set('search', search);
+
+      const res = await fetch(`/api/admin/audit-logs?${params}`);
+      
+      if (res.ok) {
+        const data = await res.json();
+        setLogs(data.logs || []);
+        setTotal(data.total || 0);
+      } else {
+        // API 실패 시 빈 배열 설정
+        setLogs([]);
+        setTotal(0);
       }
-    ];
-    
-    setLogs(dummyLogs);
-    setTotal(dummyLogs.length);
-    setLoading(false);
+    } catch (error) {
+      console.error('Failed to fetch audit logs:', error);
+      setLogs([]);
+      setTotal(0);
+    } finally {
+      setLoading(false);
+    }
   }
 
   // 필터링

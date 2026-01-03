@@ -15,7 +15,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, Code2, RefreshCw, Search, Filter, ChevronDown,
@@ -56,7 +56,13 @@ interface Stats {
 
 export default function ProjectCodeElementsPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const projectId = params.id as string;
+
+  // URL 파라미터: 파일/라인 직접 이동
+  const targetFile = searchParams.get('file');
+  const targetLine = searchParams.get('line');
+  const targetIssueId = searchParams.get('issueId');
 
   const [project, setProject] = useState<{ id: string; name: string; path: string } | null>(null);
   const [elements, setElements] = useState<CodeElement[]>([]);
@@ -260,6 +266,27 @@ export default function ProjectCodeElementsPage() {
         setProject(data.project);
         setElements(data.elements || []);
         setStats(data.stats);
+        
+        // URL 파라미터로 특정 파일/라인 지정된 경우 자동 선택
+        if (targetFile && data.elements) {
+          const matchingElement = data.elements.find((el: CodeElement) => {
+            const fileMatch = el.filePath === targetFile || el.filePath.endsWith(targetFile);
+            if (!fileMatch) return false;
+            
+            // 라인 번호도 지정된 경우 해당 범위에 있는 요소 찾기
+            if (targetLine) {
+              const lineNum = parseInt(targetLine);
+              return el.lineStart <= lineNum && el.lineEnd >= lineNum;
+            }
+            return true;
+          });
+          
+          if (matchingElement) {
+            setSelectedElement(matchingElement);
+            setShowCodePreview(true);
+            showToast(`${matchingElement.name} (${targetFile}:${targetLine || matchingElement.lineStart}) 위치로 이동했습니다`, 'info');
+          }
+        }
       }
     } catch (e) {
       console.error('Failed to load data', e);
