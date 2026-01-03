@@ -124,6 +124,29 @@ export default function ProjectCodeElementsPage() {
     }
   }, [favorites, projectId]);
 
+  // 토스트 알림
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+  const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  // 프리셋 모달
+  const [showPresetModal, setShowPresetModal] = useState(false);
+  const [presetName, setPresetName] = useState('');
+
+  // 일괄 선택
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const toggleSelectId = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  const selectAll = () => setSelectedIds(new Set(filteredElements.map(e => e.id)));
+  const clearSelection = () => setSelectedIds(new Set());
+
   // 단축키 모달
   const [showShortcuts, setShowShortcuts] = useState(false);
 
@@ -427,6 +450,29 @@ export default function ProjectCodeElementsPage() {
 
   function copyToClipboard(text: string) {
     navigator.clipboard.writeText(text);
+    showToast('클립보드에 복사되었습니다', 'success');
+  }
+
+  // 일괄 즐겨찾기 추가
+  function addSelectedToFavorites() {
+    setFavorites(prev => {
+      const next = new Set(prev);
+      selectedIds.forEach(id => next.add(id));
+      return next;
+    });
+    showToast(`${selectedIds.size}개 요소를 즐겨찾기에 추가했습니다`, 'success');
+    clearSelection();
+  }
+
+  // 일괄 즐겨찾기 제거
+  function removeSelectedFromFavorites() {
+    setFavorites(prev => {
+      const next = new Set(prev);
+      selectedIds.forEach(id => next.delete(id));
+      return next;
+    });
+    showToast(`${selectedIds.size}개 요소를 즐겨찾기에서 제거했습니다`, 'info');
+    clearSelection();
   }
 
   function getTypeColor(type: string) {
@@ -547,6 +593,38 @@ export default function ProjectCodeElementsPage() {
 
   return (
     <div className="space-y-6">
+      {/* 토스트 알림 */}
+      {toast && (
+        <div className={`fixed bottom-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 animate-slide-up ${
+          toast.type === 'success' ? 'bg-green-500 text-white' : 
+          toast.type === 'error' ? 'bg-red-500 text-white' : 
+          'bg-blue-500 text-white'
+        }`}>
+          {toast.type === 'success' && <CheckCircle className="w-5 h-5" />}
+          {toast.type === 'error' && <AlertCircle className="w-5 h-5" />}
+          {toast.type === 'info' && <AlertCircle className="w-5 h-5" />}
+          {toast.message}
+        </div>
+      )}
+
+      {/* 일괄 선택 바 */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-gray-900 text-white rounded-full px-6 py-3 flex items-center gap-4 shadow-2xl">
+          <span className="font-medium">{selectedIds.size}개 선택됨</span>
+          <button onClick={addSelectedToFavorites} className="px-3 py-1 bg-yellow-500 hover:bg-yellow-600 rounded-full text-sm flex items-center gap-1">
+            <Star className="w-4 h-4" />
+            즐겨찾기 추가
+          </button>
+          <button onClick={removeSelectedFromFavorites} className="px-3 py-1 bg-gray-600 hover:bg-gray-700 rounded-full text-sm flex items-center gap-1">
+            <StarOff className="w-4 h-4" />
+            즐겨찾기 제거
+          </button>
+          <button onClick={clearSelection} className="px-3 py-1 bg-red-500 hover:bg-red-600 rounded-full text-sm">
+            선택 해제
+          </button>
+        </div>
+      )}
+
       {/* 키보드 단축키 모달 */}
       {showShortcuts && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowShortcuts(false)}>
