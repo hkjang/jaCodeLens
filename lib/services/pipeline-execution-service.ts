@@ -484,20 +484,8 @@ export function readFile(filename: string) {
    * 스테이지 진행 상황 업데이트
    */
   private async updateStageProgress(executeId: string, stage: StageProgress): Promise<void> {
-    try {
-      await prisma.pipelineStageExecution.updateMany({
-        where: { executeId, stage: stage.stage },
-        data: {
-          status: stage.status,
-          progress: stage.progress,
-          message: stage.message,
-          startedAt: stage.status === 'running' ? new Date() : undefined,
-          completedAt: stage.status === 'completed' ? new Date() : undefined,
-        },
-      });
-    } catch (error) {
-      console.error('[Pipeline] Failed to update stage progress:', error);
-    }
+    // 스테이지 진행 로깅 (스키마에 해당 모델 없음)
+    console.log(`[Pipeline] Stage ${stage.stage}: ${stage.status} (${stage.progress}%)`);
   }
 
   /**

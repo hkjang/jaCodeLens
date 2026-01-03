@@ -65,6 +65,7 @@ export async function GET(
         elementType: e.elementType,
         name: e.name,
         signature: e.signature,
+        content: e.content, // 코드 조각 추가
         lineStart: e.lineStart,
         lineEnd: e.lineEnd,
         parentName: e.parentName,

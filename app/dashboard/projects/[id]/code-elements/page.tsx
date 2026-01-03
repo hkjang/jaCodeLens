@@ -750,7 +750,7 @@ export default function ProjectCodeElementsPage() {
             </div>
             <pre className={`p-4 text-sm text-gray-300 font-mono overflow-auto ${codePreviewFullscreen ? 'h-[calc(100%-3rem)]' : 'max-h-[500px]'}`}>
               <code>
-                {selectedElement.signature || `// ${selectedElement.elementType}: ${selectedElement.name}\n// Lines: ${selectedElement.lineStart}-${selectedElement.lineEnd}`}
+                {selectedElement.content || selectedElement.signature || `// ${selectedElement.elementType}: ${selectedElement.name}\n// Lines: ${selectedElement.lineStart}-${selectedElement.lineEnd}`}
               </code>
             </pre>
           </div>
