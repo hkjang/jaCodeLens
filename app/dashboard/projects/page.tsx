@@ -41,6 +41,8 @@ export default function ProjectsPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [sortBy, setSortBy] = useState<'name' | 'score' | 'date'>('date');
   const [typeFilter, setTypeFilter] = useState<string>('');
+  const [compareProjects, setCompareProjects] = useState<string[]>([]);
+  const [showFab, setShowFab] = useState(true);
   
   // CUD 상태
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -219,6 +221,21 @@ export default function ProjectsPage() {
       if (sortBy === 'score') return (b.lastAnalysis?.score || 0) - (a.lastAnalysis?.score || 0);
       return new Date(b.lastAnalysis?.date || 0).getTime() - new Date(a.lastAnalysis?.date || 0).getTime();
     });
+
+  // 비교 토글
+  function toggleCompare(projectId: string) {
+    setCompareProjects(prev => {
+      if (prev.includes(projectId)) {
+        return prev.filter(id => id !== projectId);
+      }
+      if (prev.length >= 2) return prev;
+      return [...prev, projectId];
+    });
+  }
+
+  function clearCompare() {
+    setCompareProjects([]);
+  }
 
   if (loading) {
     return (
@@ -632,6 +649,37 @@ export default function ProjectsPage() {
 
       {/* Undo Toast */}
       <undoToast.UndoToastComponent />
+
+      {/* 플로팅 비교 선택 바 */}
+      {compareProjects.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-full px-6 py-3 flex items-center gap-4 shadow-2xl">
+          <span className="font-medium">{compareProjects.length}/2 프로젝트 선택됨</span>
+          {compareProjects.length === 2 && (
+            <Link 
+              href={`/dashboard/self-analysis/compare?projects=${compareProjects.join(',')}`}
+              className="px-4 py-1.5 bg-white text-purple-600 rounded-full font-medium hover:bg-gray-100 transition"
+            >
+              비교하기
+            </Link>
+          )}
+          <button onClick={clearCompare} className="px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-full text-sm">
+            선택 해제
+          </button>
+        </div>
+      )}
+
+      {/* 플로팅 액션 버튼 */}
+      {showFab && (
+        <div className="fixed bottom-6 right-6 z-40 flex flex-col gap-3">
+          <Link
+            href="/dashboard/projects/new"
+            className="w-14 h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg flex items-center justify-center transition hover:scale-110"
+            title="새 프로젝트"
+          >
+            <Plus className="w-6 h-6" />
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
