@@ -216,6 +216,7 @@ model AnalysisExecute {
   agentExecutions AgentExecution[]
   dependencies Dependency[]
   approvalWorkflows ApprovalWorkflow[]
+  normalizedResults NormalizedAnalysisResult[]
 }
 
 model AnalysisResult {
@@ -243,6 +244,65 @@ model AnalysisResult {
   // Relations to specific details
   vulnerability   Vulnerability?
   architecturalIssue ArchitecturalIssue?
+}
+
+// --- Deterministic Pipeline Results (새 파이프라인 정규화 결과) ---
+
+model NormalizedAnalysisResult {
+  id          String   @id @default(uuid())
+  executeId   String
+  execute     AnalysisExecute @relation(fields: [executeId], references: [id], onDelete: Cascade)
+  
+  // 위치 정보
+  filePath    String
+  lineStart   Int
+  lineEnd     Int
+  
+  // 분류 정보
+  language    String   // typescript, javascript, python, java, etc.
+  mainCategory String  // STRUCTURE, QUALITY, SECURITY, OPERATIONS, TEST, STANDARDS
+  subCategory String   // LAYER, CIRCULAR, COMPLEXITY, DUPLICATION, INJECTION, XSS, etc.
+  ruleId      String   // SEC001, STY010, ARCH001, etc.
+  severity    String   // CRITICAL, HIGH, MEDIUM, LOW, INFO
+  
+  // 내용
+  message     String
+  suggestion  String?
+  
+  // 원본 데이터 (JSON)
+  rawResult   String?
+  
+  // AI 보강 필드 (정규화 이후에만 채워짐)
+  aiExplanation   String?
+  aiSuggestion    String?
+  aiSecurityAdvice String?
+  
+  // 메타데이터
+  deterministic Boolean @default(true)  // AI 없이 생성된 결과인지
+  createdAt   DateTime @default(now())
+  
+  @@index([executeId, severity])
+  @@index([executeId, mainCategory])
+  @@index([filePath])
+}
+
+// 파이프라인 실행 스테이지 추적
+model PipelineStageExecution {
+  id          String   @id @default(uuid())
+  executeId   String
+  
+  stage       String   // SOURCE_COLLECT, LANGUAGE_DETECT, AST_PARSE, etc.
+  status      String   // pending, running, completed, failed, skipped
+  progress    Int      @default(0)  // 0-100
+  message     String?
+  error       String?
+  
+  startedAt   DateTime?
+  completedAt DateTime?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([executeId])
 }
 
 
