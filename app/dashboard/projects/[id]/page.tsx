@@ -8,7 +8,7 @@ import {
   Shield, BarChart3, Layers, Activity, TestTube, FileCode,
   AlertTriangle, CheckCircle, Clock, Zap, TrendingUp, TrendingDown,
   ChevronRight, ExternalLink, PlayCircle, RefreshCw, Target,
-  History, LineChart
+  History, LineChart, Code2
 } from 'lucide-react';
 
 interface ProjectHealth {
@@ -122,6 +122,13 @@ export default function ProjectDetailPage() {
           >
             <LineChart className="w-4 h-4" />
             트렌드
+          </Link>
+          <Link
+            href={`/dashboard/projects/${projectId}/code-elements`}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg"
+          >
+            <Code2 className="w-4 h-4" />
+            코드 요소
           </Link>
           <Link
             href={`/dashboard/execution?project=${projectId}`}
