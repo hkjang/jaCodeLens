@@ -1,76 +1,130 @@
 'use client';
 
-import { FileText, Calendar, CheckCircle, XCircle, Clock, TrendingUp, TrendingDown } from 'lucide-react';
-import { motion } from 'framer-motion';
+/**
+ * 전역 히스토리 페이지 - 프로젝트 선택으로 개선
+ */
 
-const mockHistory = [
-  { id: '1', project: 'JacodeLens Core', date: '2024-12-20 13:45', score: 78.5, prevScore: 72.8, status: 'completed', issues: 6 },
-  { id: '2', project: 'Payment Gateway', date: '2024-12-19 10:30', score: 65.2, prevScore: 68.1, status: 'completed', issues: 7 },
-  { id: '3', project: 'ML Pipeline', date: '2024-12-18 15:20', score: 82.1, prevScore: 80.5, status: 'completed', issues: 3 },
-  { id: '4', project: 'Mobile App API', date: '2024-12-18 09:15', score: 91.3, prevScore: 89.7, status: 'completed', issues: 2 },
-  { id: '5', project: 'DevOps Automation', date: '2024-12-17 14:00', score: 85.7, prevScore: 85.0, status: 'completed', issues: 2 },
-  { id: '6', project: 'JacodeLens Core', date: '2024-12-13 11:30', score: 72.8, prevScore: 70.2, status: 'completed', issues: 8 },
-  { id: '7', project: 'Payment Gateway', date: '2024-12-12 16:45', score: 68.1, prevScore: 65.5, status: 'failed', issues: 0 },
-];
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { History, FolderGit2, ArrowRight, Plus, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
 
-export default function HistoryPage() {
-  return (
-    <div className="space-y-6">
-      <header>
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">히스토리</h2>
-        <p className="text-gray-500">분석 실행 기록을 확인합니다</p>
-      </header>
+interface Project {
+  id: string;
+  name: string;
+  type: string | null;
+  lastAnalysis?: {
+    score: number;
+    scoreChange?: number;
+    date: string;
+  } | null;
+}
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div className="grid grid-cols-6 gap-4 p-4 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-500">
-          <span>프로젝트</span>
-          <span>일시</span>
-          <span>점수</span>
-          <span>변화</span>
-          <span>이슈</span>
-          <span>상태</span>
-        </div>
-        <div className="divide-y divide-gray-100 dark:divide-gray-700">
-          {mockHistory.map((item, index) => {
-            const scoreDiff = item.score - item.prevScore;
-            const isImproved = scoreDiff > 0;
-            return (
-              <motion.div
-                key={item.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.05 }}
-                className="grid grid-cols-6 gap-4 p-4 items-center hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
-              >
-                <span className="font-medium text-gray-900 dark:text-white flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-gray-400" />
-                  {item.project}
-                </span>
-                <span className="text-gray-600 dark:text-gray-400 flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-gray-400" />
-                  {item.date}
-                </span>
-                <span className="font-bold text-lg text-gray-900 dark:text-white">{item.score}</span>
-                <span className={`flex items-center gap-1 ${isImproved ? 'text-green-500' : 'text-red-500'}`}>
-                  {isImproved ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                  {isImproved ? '+' : ''}{scoreDiff.toFixed(1)}
-                </span>
-                <span className="text-gray-600 dark:text-gray-400">{item.issues}개</span>
-                <span className="flex items-center gap-2">
-                  {item.status === 'completed' ? (
-                    <CheckCircle className="w-4 h-4 text-green-500" />
-                  ) : item.status === 'failed' ? (
-                    <XCircle className="w-4 h-4 text-red-500" />
-                  ) : (
-                    <Clock className="w-4 h-4 text-yellow-500" />
-                  )}
-                  <span className="text-sm capitalize">{item.status === 'completed' ? '완료' : item.status === 'failed' ? '실패' : '진행중'}</span>
-                </span>
-              </motion.div>
-            );
-          })}
-        </div>
+export default function GlobalHistoryPage() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadProjects() {
+      try {
+        const res = await fetch('/api/projects');
+        if (res.ok) {
+          setProjects(await res.json());
+        }
+      } catch (e) {
+        console.error('Failed to load projects', e);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadProjects();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <RefreshCw className="w-8 h-8 animate-spin text-gray-400" />
       </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-8">
+      {/* 헤더 */}
+      <div className="text-center">
+        <div className="w-16 h-16 bg-purple-100 dark:bg-purple-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <History className="w-8 h-8 text-purple-600" />
+        </div>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">분석 히스토리</h1>
+        <p className="text-gray-500 mt-2">프로젝트를 선택하여 분석 히스토리를 확인하세요</p>
+      </div>
+
+      {/* 프로젝트 선택 그리드 */}
+      {projects.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {projects.map(project => (
+            <Link
+              key={project.id}
+              href={`/dashboard/projects/${project.id}/history/trends`}
+              className="group p-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-purple-500 dark:hover:border-purple-500 transition hover:shadow-lg"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                    <FolderGit2 className="w-5 h-5 text-gray-500" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-purple-600 transition">
+                      {project.name}
+                    </h3>
+                    <p className="text-sm text-gray-500">{project.type || '프로젝트'}</p>
+                  </div>
+                </div>
+                <ArrowRight className="w-5 h-5 text-gray-400 group-hover:text-purple-500 group-hover:translate-x-1 transition" />
+              </div>
+              
+              {project.lastAnalysis && (
+                <div className="mt-4 flex items-center gap-4 text-sm">
+                  <span className={`font-bold ${
+                    project.lastAnalysis.score >= 80 ? 'text-green-600' :
+                    project.lastAnalysis.score >= 60 ? 'text-yellow-600' :
+                    'text-red-600'
+                  }`}>
+                    {project.lastAnalysis.score}점
+                  </span>
+                  {project.lastAnalysis.scoreChange !== undefined && (
+                    <span className={`flex items-center gap-1 ${
+                      project.lastAnalysis.scoreChange >= 0 ? 'text-green-500' : 'text-red-500'
+                    }`}>
+                      {project.lastAnalysis.scoreChange >= 0 ? (
+                        <TrendingUp className="w-4 h-4" />
+                      ) : (
+                        <TrendingDown className="w-4 h-4" />
+                      )}
+                      {project.lastAnalysis.scoreChange >= 0 ? '+' : ''}{project.lastAnalysis.scoreChange}
+                    </span>
+                  )}
+                  <span className="text-gray-400 text-xs">
+                    {new Date(project.lastAnalysis.date).toLocaleDateString('ko-KR')}
+                  </span>
+                </div>
+              )}
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+          <FolderGit2 className="w-12 h-12 mx-auto text-gray-400 mb-4" />
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">프로젝트가 없습니다</h3>
+          <p className="text-gray-500 mb-4">먼저 프로젝트를 추가하세요</p>
+          <Link 
+            href="/dashboard/projects/new"
+            className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
+          >
+            <Plus className="w-5 h-5" />
+            새 프로젝트 추가
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
