@@ -760,23 +760,58 @@ export default function ProjectCodeElementsPage() {
         </div>
       </header>
 
-      {/* 분석 진행 표시기 */}
+      {/* 라이브 분석 진행 배너 */}
       {analyzing && analyzeProgress.total > 0 && (
-        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-blue-700 dark:text-blue-300 font-medium flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              AI 분석 진행 중...
-            </span>
-            <span className="text-blue-600 dark:text-blue-400 text-sm">
-              {analyzeProgress.current} / {analyzeProgress.total}
-            </span>
+        <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 rounded-xl p-5 text-white shadow-lg">
+          {/* 애니메이션 배경 */}
+          <div className="absolute inset-0 opacity-20">
+            <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.1)_50%,transparent_75%)] bg-[length:250%_250%] animate-pulse" />
           </div>
-          <div className="w-full h-2 bg-blue-200 dark:bg-blue-800 rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-blue-500 transition-all duration-500"
-              style={{ width: `${(analyzeProgress.current / analyzeProgress.total) * 100}%` }}
-            />
+          
+          <div className="relative">
+            {/* 헤더 */}
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-10 h-10 bg-white/20 backdrop-blur rounded-full">
+                  <Activity className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg">🤖 AI 분석 진행 중</h3>
+                  <div className="flex items-center gap-3 text-white/80 text-sm">
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5" />
+                      요소 분석 중
+                    </span>
+                    <span className="flex items-center gap-1 px-2 py-0.5 bg-white/20 rounded-full">
+                      {analyzeProgress.current}/{analyzeProgress.total} 완료
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setAnalyzing(false)}
+                className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg font-medium transition"
+              >
+                <X className="w-4 h-4" />
+                중지
+              </button>
+            </div>
+
+            {/* 진행률 바 */}
+            <div>
+              <div className="flex justify-between text-sm mb-1.5">
+                <span className="font-medium">전체 진행률</span>
+                <span className="font-bold">{Math.round((analyzeProgress.current / analyzeProgress.total) * 100)}%</span>
+              </div>
+              <div className="h-3 bg-white/20 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-white rounded-full transition-all duration-500 relative"
+                  style={{ width: `${(analyzeProgress.current / analyzeProgress.total) * 100}%` }}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent animate-pulse" />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
