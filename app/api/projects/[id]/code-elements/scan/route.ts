@@ -46,6 +46,15 @@ export async function POST(
     console.log(`\n🔍 [CodeElement Scan] Starting scan for project: ${project.name}`);
     console.log(`   Path: ${project.path}`);
 
+    // Git URL인 경우 로컬 스캔 불가
+    if (project.path.startsWith('http://') || project.path.startsWith('https://') || project.path.startsWith('git@')) {
+      return NextResponse.json({ 
+        error: 'Git URL 프로젝트는 직접 스캔할 수 없습니다. 로컬 경로를 설정해주세요.',
+        path: project.path,
+        hint: '프로젝트 설정에서 로컬 클론 경로로 변경하세요'
+      }, { status: 400 });
+    }
+
     // 프로젝트 경로 존재 확인
     try {
       await fs.access(project.path);
