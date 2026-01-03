@@ -1,11 +1,9 @@
 /**
  * 스냅샷 상세 API
- * 
- * 개별 스냅샷 상세 정보 조회
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSnapshotBuilder } from '../route';
+import { getSnapshotBuilder } from '@/lib/services/analysis-service';
 
 export async function GET(
   request: NextRequest,
@@ -24,7 +22,6 @@ export async function GET(
       );
     }
 
-    // 검증
     const isValid = await builder.verify(id);
 
     return NextResponse.json({

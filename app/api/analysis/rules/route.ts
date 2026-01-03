@@ -1,30 +1,10 @@
 /**
  * 규칙 API
- * 
- * 분석 규칙 CRUD
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { 
-  RuleEngine, 
-  RuleDefinition, 
-  RuleBuilder,
-  defaultRules 
-} from '@/lib/pipeline/static/rule-engine';
-
-// 글로벌 룰 엔진 (실제로는 서비스 레이어에서 관리)
-let ruleEngine: RuleEngine | null = null;
-
-export function getRuleEngine(): RuleEngine {
-  if (!ruleEngine) {
-    ruleEngine = new RuleEngine();
-    // 기본 룰 로드
-    for (const rule of defaultRules) {
-      ruleEngine.register(rule);
-    }
-  }
-  return ruleEngine;
-}
+import { getRuleEngine } from '@/lib/services/analysis-service';
+import type { RuleDefinition } from '@/lib/pipeline/static/rule-engine';
 
 interface RuleListResponse {
   rules: RuleDefinition[];
@@ -41,7 +21,6 @@ export async function GET(request: NextRequest) {
     const engine = getRuleEngine();
     let rules = engine.getRules();
 
-    // 필터링
     if (category) {
       rules = rules.filter(r => r.category === category);
     }
@@ -67,7 +46,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// 규칙 추가
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -92,7 +70,6 @@ export async function POST(request: NextRequest) {
 
     const engine = getRuleEngine();
 
-    // 간단한 룰 생성 (DSL 기반 생성은 클라이언트에서)
     const rule: RuleDefinition = {
       id,
       name,

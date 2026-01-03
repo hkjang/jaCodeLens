@@ -1,11 +1,9 @@
 /**
  * 규칙 상세 API
- * 
- * 개별 규칙 수정/삭제
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getRuleEngine } from '../route';
+import { getRuleEngine } from '@/lib/services/analysis-service';
 
 export async function GET(
   request: NextRequest,
@@ -53,11 +51,10 @@ export async function PUT(
       );
     }
 
-    // 업데이트
     const updatedRule = {
       ...existingRule,
       ...body,
-      id, // ID는 변경 불가
+      id,
     };
 
     engine.register(updatedRule);
@@ -77,7 +74,6 @@ export async function PUT(
   }
 }
 
-// 규칙 활성화/비활성화 토글
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

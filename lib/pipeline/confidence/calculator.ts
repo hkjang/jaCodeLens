@@ -1,12 +1,7 @@
 /**
- * 분석 신뢰도 산정 로직
+ * 분석 신뢰도 산정 로직 (명세 19 준수)
  * 
- * 분석 결과의 신뢰도를 다차원으로 산정합니다.
- * - 정적 분석 비율
- * - AI 개입 가중치
- * - 근거 수
- * - 재현성
- * - 변경 민감도
+ * 신뢰도 = 룰기반(0.5) + AST근거(0.2) + 재현성(0.2) + AI감점(-0.1) + 변경량감점(-0.1)
  */
 
 import { NormalizedResult, Severity, MainCategory } from '../types';
@@ -18,22 +13,22 @@ import { NormalizedResult, Severity, MainCategory } from '../types';
 export interface ConfidenceScore {
   overall: number;          // 종합 신뢰도 (0-1)
   components: {
-    staticRatio: number;    // 정적 분석 비율
-    aiWeight: number;       // AI 신뢰도 가중치
-    evidenceCount: number;  // 근거 기반 점수
-    reproducibility: number; // 재현성 점수
-    sensitivity: number;    // 변경 민감도
+    ruleBased: number;      // 룰 기반 점수 (명세 19: 가중치 0.5)
+    astEvidence: number;    // AST 근거 점수 (명세 19: 가중치 0.2)
+    reproducibility: number; // 재현성 점수 (명세 19: 가중치 0.2)
+    aiPenalty: number;      // AI 개입 감점 (명세 19: 가중치 -0.1)
+    changePenalty: number;  // 변경량 감점 (명세 19: 가중치 -0.1)
   };
   details: string[];        // 상세 설명
 }
 
 export interface ConfidenceConfig {
   weights: {
-    staticRatio: number;
-    aiWeight: number;
-    evidenceCount: number;
-    reproducibility: number;
-    sensitivity: number;
+    ruleBased: number;      // 룰 기반 가중치 (0.5)
+    astEvidence: number;    // AST 근거 가중치 (0.2)
+    reproducibility: number; // 재현성 가중치 (0.2)
+    aiPenalty: number;      // AI 감점 가중치 (-0.1)
+    changePenalty: number;  // 변경량 감점 가중치 (-0.1)
   };
   thresholds: {
     high: number;           // 높은 신뢰도 기준
@@ -45,13 +40,14 @@ export interface ConfidenceConfig {
 
 export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW' | 'VERY_LOW';
 
+// 명세 19 가중치 적용
 const DEFAULT_CONFIG: ConfidenceConfig = {
   weights: {
-    staticRatio: 0.30,
-    aiWeight: 0.25,
-    evidenceCount: 0.20,
-    reproducibility: 0.15,
-    sensitivity: 0.10,
+    ruleBased: 0.50,        // 룰 기반 (가장 높음)
+    astEvidence: 0.20,      // AST 근거
+    reproducibility: 0.20,  // 재현성
+    aiPenalty: -0.10,       // AI 개입 감점
+    changePenalty: -0.10,   // 변경량 감점
   },
   thresholds: {
     high: 0.8,
@@ -78,26 +74,28 @@ export class ConfidenceCalculator {
   }
 
   /**
-   * 단일 결과 신뢰도 산정
+   * 단일 결과 신뢰도 산정 (명세 19 공식)
    */
   calculate(result: NormalizedResult, context?: {
     previousResults?: NormalizedResult[];
     codeChanged?: boolean;
   }): ConfidenceScore {
     const components = {
-      staticRatio: this.calculateStaticRatio(result),
-      aiWeight: this.calculateAIWeight(result),
-      evidenceCount: this.calculateEvidenceScore(result),
+      ruleBased: this.calculateRuleBased(result),
+      astEvidence: this.calculateASTEvidence(result),
       reproducibility: this.calculateReproducibility(result, context?.previousResults),
-      sensitivity: this.calculateSensitivity(result, context?.codeChanged),
+      aiPenalty: this.calculateAIPenalty(result),
+      changePenalty: this.calculateChangePenalty(result, context?.codeChanged),
     };
 
-    const overall = 
-      components.staticRatio * this.config.weights.staticRatio +
-      components.aiWeight * this.config.weights.aiWeight +
-      components.evidenceCount * this.config.weights.evidenceCount +
+    // 명세 19 공식: 룰(0.5) + AST(0.2) + 재현(0.2) + AI감점(-0.1) + 변경감점(-0.1)
+    const overall = Math.max(0, Math.min(1,
+      components.ruleBased * this.config.weights.ruleBased +
+      components.astEvidence * this.config.weights.astEvidence +
       components.reproducibility * this.config.weights.reproducibility +
-      components.sensitivity * this.config.weights.sensitivity;
+      components.aiPenalty * this.config.weights.aiPenalty + // 감점
+      components.changePenalty * this.config.weights.changePenalty // 감점
+    ));
 
     const details = this.generateDetails(components, result);
 
@@ -149,41 +147,64 @@ export class ConfidenceCalculator {
   }
 
   /**
-   * 정적 분석 비율 계산
+   * 룰 기반 점수 (명세 19: 가중치 0.5)
    */
-  private calculateStaticRatio(result: NormalizedResult): number {
-    // AI 보강이 없으면 100% 정적
-    if (!result.aiExplanation && !result.aiSuggestion && !result.aiSecurityAdvice) {
-      return 1.0;
+  private calculateRuleBased(result: NormalizedResult): number {
+    // 룰 ID가 있으면 룰 기반 결과
+    if (result.ruleId && result.ruleId.length > 0) {
+      return 1.0; // 룰 기반 100%
     }
 
-    // AI 보강이 있으면 deterministic 플래그 확인
+    // deterministic 플래그 확인
     if (result.deterministic) {
-      return 0.8; // 정적 결과 + AI 보강
+      return 0.8; // 결정적 결과
     }
 
-    // 순수 AI 결과
+    // AI 전용 결과
     return 0.3;
   }
 
   /**
-   * AI 신뢰도 가중치 계산
+   * AST 근거 점수 (명세 19: 가중치 0.2)
    */
-  private calculateAIWeight(result: NormalizedResult): number {
+  private calculateASTEvidence(result: NormalizedResult): number {
+    let evidenceCount = 0;
+
+    // 위치 정보 (AST 노드 링크)
+    if (result.lineStart > 0) evidenceCount++;
+    if (result.lineEnd > result.lineStart) evidenceCount++;
+
+    // 제안
+    if (result.suggestion) evidenceCount++;
+
+    // 참조
     const rawResult = result.rawResult as Record<string, unknown>;
-    
-    // AI 신뢰도가 명시된 경우
+    if (Array.isArray(rawResult?.nodeIds)) {
+      evidenceCount += (rawResult.nodeIds as string[]).length;
+    }
+
+    // 정규화 (최소 3개 기준)
+    return Math.min(1, evidenceCount / this.config.evidenceMinCount);
+  }
+
+  /**
+   * AI 개입 감점 (명세 19: 가중치 -0.1)
+   * 반환값이 클수록 감점이 큼
+   */
+  private calculateAIPenalty(result: NormalizedResult): number {
+    // AI 보강이 없으면 감점 없음
+    if (!result.aiExplanation && !result.aiSuggestion && !result.aiSecurityAdvice) {
+      return 0; // 감점 없음
+    }
+
+    // AI 신뢰도가 높으면 감점 적음
+    const rawResult = result.rawResult as Record<string, unknown>;
     if (typeof rawResult?.confidence === 'number') {
-      return rawResult.confidence as number;
+      return 1 - (rawResult.confidence as number); // 신뢰도가 낮을수록 감점
     }
 
-    // AI 보강이 없으면 정적 분석이므로 높은 신뢰도
-    if (!result.aiExplanation) {
-      return 1.0;
-    }
-
-    // 기본 AI 신뢰도
-    return 0.7;
+    // 기본 AI 감점
+    return 0.5;
   }
 
   /**
@@ -247,27 +268,28 @@ export class ConfidenceCalculator {
   }
 
   /**
-   * 변경 민감도 계산
+   * 변경량 감점 (명세 19: 가중치 -0.1)
+   * 반환값이 클수록 감점이 큼
    */
-  private calculateSensitivity(
+  private calculateChangePenalty(
     result: NormalizedResult,
     codeChanged?: boolean
   ): number {
     if (codeChanged === undefined) {
-      return 0.8; // 정보 없음, 기본값
+      return 0; // 정보 없음, 감점 없음
     }
 
     if (codeChanged) {
-      // 코드가 변경된 경우, 결과가 해당 변경과 관련있을 수 있음
-      return 0.6;
+      // 코드가 변경된 경우 감점 적용
+      return 0.5;
     }
 
-    // 코드 변경 없이 동일한 결과면 높은 안정성
-    return 1.0;
+    // 코드 변경 없으면 감점 없음
+    return 0;
   }
 
   /**
-   * 상세 설명 생성
+   * 상세 설명 생성 (명세 19 기준)
    */
   private generateDetails(
     components: ConfidenceScore['components'],
@@ -275,28 +297,33 @@ export class ConfidenceCalculator {
   ): string[] {
     const details: string[] = [];
 
-    if (components.staticRatio >= 0.8) {
-      details.push('정적 분석 기반 결과');
-    } else if (components.staticRatio >= 0.5) {
-      details.push('정적 + AI 하이브리드 결과');
+    // 룰 기반 분석
+    if (components.ruleBased >= 0.8) {
+      details.push('룰 기반 정적 분석 결과');
+    } else if (components.ruleBased >= 0.5) {
+      details.push('준정적 분석 결과');
     } else {
-      details.push('AI 분석 주도 결과');
+      details.push('AI 주도 분석 결과');
     }
 
-    if (components.aiWeight < 0.6) {
-      details.push('AI 신뢰도가 낮음');
+    // AST 근거 부족
+    if (components.astEvidence < 0.5) {
+      details.push('AST 근거가 부족함');
     }
 
-    if (components.evidenceCount < 0.5) {
-      details.push('근거가 부족함');
+    // AI 감점
+    if (components.aiPenalty > 0.3) {
+      details.push('AI 개입으로 신뢰도 감소');
     }
 
+    // 재현성 문제
     if (components.reproducibility < 0.6) {
       details.push('재현성 검증 필요');
     }
 
-    if (components.sensitivity < 0.7) {
-      details.push('최근 코드 변경에 민감');
+    // 변경량 감점
+    if (components.changePenalty > 0.3) {
+      details.push('최근 코드 변경으로 불안정');
     }
 
     return details;

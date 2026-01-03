@@ -1,7 +1,10 @@
 /**
- * 자동 언어 감지 서비스
+ * 자동 언어 감지 서비스 (명세 3 준수)
  * 
- * 파일 확장자 및 shebang을 기반으로 언어를 자동 감지합니다.
+ * 3단계 언어 감지:
+ * 1차: 파일 확장자
+ * 2차: 빌드 파일 (package.json, pom.xml 등)
+ * 3차: 디렉토리 패턴 (src/main/java 등)
  */
 
 import { 
@@ -11,6 +14,48 @@ import {
   SupportedLanguage 
 } from '../types';
 import { LanguageRegistry } from './registry';
+
+// 빌드 파일 → 언어 매핑 (명세 3.2)
+const BUILD_FILE_MAPPINGS: Record<string, SupportedLanguage> = {
+  'package.json': 'typescript',
+  'tsconfig.json': 'typescript',
+  'pom.xml': 'java',
+  'build.gradle': 'java',
+  'build.gradle.kts': 'java',
+  'settings.gradle': 'java',
+  'requirements.txt': 'python',
+  'setup.py': 'python',
+  'pyproject.toml': 'python',
+  'Pipfile': 'python',
+  'go.mod': 'go',
+  'go.sum': 'go',
+  'Cargo.toml': 'rust',
+  '*.csproj': 'csharp',
+  '*.sln': 'csharp',
+  'CMakeLists.txt': 'cpp',
+  'Makefile': 'cpp',
+};
+
+// 디렉토리 패턴 → 언어 매핑 (명세 3.3)
+const DIRECTORY_PATTERNS: { pattern: RegExp; language: SupportedLanguage }[] = [
+  { pattern: /src[/\\]main[/\\]java/, language: 'java' },
+  { pattern: /src[/\\]test[/\\]java/, language: 'java' },
+  { pattern: /src[/\\]main[/\\]kotlin/, language: 'java' }, // Kotlin도 Java로
+  { pattern: /src[/\\]main[/\\]go/, language: 'go' },
+  { pattern: /cmd[/\\]/, language: 'go' },
+  { pattern: /pkg[/\\]/, language: 'go' },
+  { pattern: /internal[/\\]/, language: 'go' },
+  { pattern: /src[/\\]components/, language: 'typescript' },
+  { pattern: /src[/\\]pages/, language: 'typescript' },
+  { pattern: /app[/\\]/, language: 'typescript' }, // Next.js
+  { pattern: /lib[/\\]/, language: 'typescript' },
+];
+
+// 프로젝트 단위 캐시 (명세 3.5)
+const projectLanguageCache: Map<string, {
+  languages: SupportedLanguage[];
+  timestamp: number;
+}> = new Map();
 
 export class LanguageDetector {
   /**
@@ -44,6 +89,17 @@ export class LanguageDetector {
       }
     }
 
+    // 3차: 디렉토리 패턴 기반 감지
+    const dirLanguage = this.detectByDirectoryPattern(file.path);
+    if (dirLanguage !== 'unknown') {
+      return {
+        filePath: file.path,
+        language: dirLanguage,
+        confidence: 0.7,
+        detectedBy: 'content' // 디렉토리 패턴도 content로
+      };
+    }
+
     // 미감지
     return {
       filePath: file.path,
@@ -51,6 +107,86 @@ export class LanguageDetector {
       confidence: 0,
       detectedBy: 'extension'
     };
+  }
+
+  /**
+   * 빌드 파일 기반 프로젝트 언어 감지 (명세 3.2)
+   */
+  static detectByBuildFiles(files: FileInfo[]): SupportedLanguage[] {
+    const detected = new Set<SupportedLanguage>();
+
+    for (const file of files) {
+      const fileName = file.path.split(/[/\\]/).pop() || '';
+      
+      // 정확히 일치하는 빌드 파일
+      if (BUILD_FILE_MAPPINGS[fileName]) {
+        detected.add(BUILD_FILE_MAPPINGS[fileName]);
+        continue;
+      }
+
+      // 패턴 매칭 (*.csproj 등)
+      for (const [pattern, lang] of Object.entries(BUILD_FILE_MAPPINGS)) {
+        if (pattern.startsWith('*')) {
+          const ext = pattern.slice(1);
+          if (fileName.endsWith(ext)) {
+            detected.add(lang);
+          }
+        }
+      }
+    }
+
+    return Array.from(detected);
+  }
+
+  /**
+   * 디렉토리 패턴 기반 언어 감지 (명세 3.3)
+   */
+  static detectByDirectoryPattern(filePath: string): SupportedLanguage {
+    for (const { pattern, language } of DIRECTORY_PATTERNS) {
+      if (pattern.test(filePath)) {
+        return language;
+      }
+    }
+    return 'unknown';
+  }
+
+  /**
+   * 프로젝트 전체 언어 감지 (캐시 활용, 명세 3.5)
+   */
+  static detectProjectLanguages(
+    projectId: string,
+    files: FileInfo[],
+    forceRefresh = false
+  ): SupportedLanguage[] {
+    // 캐시 확인 (10분 유효)
+    const cached = projectLanguageCache.get(projectId);
+    if (!forceRefresh && cached && Date.now() - cached.timestamp < 600000) {
+      return cached.languages;
+    }
+
+    // 빌드 파일 기반 감지
+    const buildLanguages = this.detectByBuildFiles(files);
+    
+    // 파일 확장자 기반 감지
+    const mappings = this.detectFiles(files);
+    const extensionLanguages = new Set<SupportedLanguage>();
+    for (const m of mappings) {
+      if (m.language !== 'unknown') {
+        extensionLanguages.add(m.language);
+      }
+    }
+
+    // 결합 (빌드 파일 우선)
+    const allLanguages = new Set([...buildLanguages, ...extensionLanguages]);
+    const result = Array.from(allLanguages);
+
+    // 캐시 저장
+    projectLanguageCache.set(projectId, {
+      languages: result,
+      timestamp: Date.now(),
+    });
+
+    return result;
   }
 
   /**

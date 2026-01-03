@@ -1,12 +1,10 @@
 /**
  * 작업 큐 API
- * 
- * 분석 작업 큐 상태를 조회하고 관리합니다.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getGlobalScheduler } from '../agents/route';
-import { AgentType, TaskStatus } from '@/lib/pipeline/agents/scheduler';
+import { getScheduler } from '@/lib/services/analysis-service';
+import type { TaskStatus, AgentType } from '@/lib/pipeline/agents/scheduler';
 
 interface QueueTask {
   id: string;
@@ -42,18 +40,16 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '50');
     const status = searchParams.get('status') as TaskStatus | null;
 
-    const scheduler = getGlobalScheduler();
+    const scheduler = getScheduler();
     const stats = scheduler.getStats();
 
-    // 실제 구현에서는 스케줄러에서 작업 목록 조회
-    // 여기서는 통계 기반 mock 데이터 생성
     const mockTasks: QueueTask[] = [];
+    const agentTypes: AgentType[] = ['ast', 'rule', 'security', 'dependency', 'ai'];
 
-    // Pending tasks mock
     for (let i = 0; i < Math.min(stats.pendingTasks, limit); i++) {
       mockTasks.push({
         id: `pending_${i}`,
-        agentType: ['ast', 'rule', 'security', 'dependency', 'ai'][i % 5] as AgentType,
+        agentType: agentTypes[i % 5],
         status: 'pending',
         priority: Math.floor(Math.random() * 10),
         retryCount: 0,
@@ -61,11 +57,10 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Running tasks mock
     for (let i = 0; i < Math.min(stats.runningTasks, 4); i++) {
       mockTasks.push({
         id: `running_${i}`,
-        agentType: ['ast', 'rule', 'security', 'dependency', 'ai'][i % 5] as AgentType,
+        agentType: agentTypes[i % 5],
         status: 'running',
         priority: 5,
         retryCount: 0,
@@ -74,11 +69,10 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Completed tasks mock
     for (let i = 0; i < Math.min(stats.completedTasks, limit); i++) {
       mockTasks.push({
         id: `completed_${i}`,
-        agentType: ['ast', 'rule', 'security', 'dependency', 'ai'][i % 5] as AgentType,
+        agentType: agentTypes[i % 5],
         status: 'completed',
         priority: 5,
         retryCount: 0,
@@ -89,11 +83,10 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Failed tasks mock
     for (let i = 0; i < Math.min(stats.failedTasks, limit); i++) {
       mockTasks.push({
         id: `failed_${i}`,
-        agentType: ['ast', 'rule', 'security', 'dependency', 'ai'][i % 5] as AgentType,
+        agentType: agentTypes[i % 5],
         status: 'failed',
         priority: 5,
         retryCount: 3,
@@ -104,7 +97,6 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 상태별 필터링
     let filteredTasks = mockTasks;
     if (status) {
       filteredTasks = mockTasks.filter(t => t.status === status);
@@ -136,7 +128,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// 작업 추가
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -149,7 +140,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const scheduler = getGlobalScheduler();
+    const scheduler = getScheduler();
     const taskId = scheduler.addTask(agentType, input, { priority });
 
     return NextResponse.json({

@@ -1,21 +1,10 @@
 /**
  * 스냅샷 API
- * 
- * 분석 스냅샷 목록 조회 및 관리
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { SnapshotBuilder, MemorySnapshotStorage, SnapshotMeta } from '@/lib/pipeline/merger/snapshot-storage';
-
-// 글로벌 스냅샷 빌더 (실제로는 서비스 레이어에서 관리)
-let snapshotBuilder: SnapshotBuilder | null = null;
-
-export function getSnapshotBuilder(): SnapshotBuilder {
-  if (!snapshotBuilder) {
-    snapshotBuilder = new SnapshotBuilder(new MemorySnapshotStorage({ maxSnapshots: 100 }));
-  }
-  return snapshotBuilder;
-}
+import { getSnapshotBuilder } from '@/lib/services/analysis-service';
+import type { SnapshotMeta } from '@/lib/pipeline/merger/snapshot-storage';
 
 interface SnapshotListResponse {
   snapshots: SnapshotMeta[];
@@ -34,7 +23,6 @@ export async function GET(request: NextRequest) {
     const builder = getSnapshotBuilder();
     const snapshots = await builder.list(projectId, pageSize * page);
 
-    // 페이지네이션 적용
     const startIndex = (page - 1) * pageSize;
     const paginatedSnapshots = snapshots.slice(startIndex, startIndex + pageSize);
 
@@ -56,7 +44,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// 스냅샷 비교
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();

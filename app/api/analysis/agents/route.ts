@@ -1,26 +1,12 @@
 /**
  * 에이전트 상태 API
- * 
- * 분석 에이전트의 실시간 상태를 조회합니다.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { AgentScheduler, AgentTask, AgentType, SchedulerStats } from '@/lib/pipeline/agents/scheduler';
+import { getScheduler } from '@/lib/services/analysis-service';
+import type { SchedulerStats } from '@/lib/pipeline/agents/scheduler';
 
-// 글로벌 스케줄러 인스턴스 (실제로는 서비스 레이어에서 관리)
-let globalScheduler: AgentScheduler | null = null;
-
-export function getGlobalScheduler(): AgentScheduler {
-  if (!globalScheduler) {
-    globalScheduler = new AgentScheduler({
-      maxConcurrency: 4,
-      maxRetries: 3,
-      retryBaseDelayMs: 1000,
-      taskTimeoutMs: 60000,
-    });
-  }
-  return globalScheduler;
-}
+type AgentType = 'ast' | 'rule' | 'security' | 'dependency' | 'ai';
 
 interface AgentInfo {
   type: AgentType;
@@ -39,7 +25,6 @@ interface AgentStatusResponse {
   lastUpdated: string;
 }
 
-// Mock 에이전트 정보 (실제 구현에서는 스케줄러에서 추적)
 const agentDefinitions: Omit<AgentInfo, 'status' | 'currentTask' | 'tasksCompleted' | 'averageTime'>[] = [
   { type: 'ast', name: 'AST Agent', description: 'AST 구조 분석' },
   { type: 'rule', name: 'Rule Agent', description: '정적 룰 분석' },
@@ -48,14 +33,12 @@ const agentDefinitions: Omit<AgentInfo, 'status' | 'currentTask' | 'tasksComplet
   { type: 'ai', name: 'AI Agent', description: 'AI 의미 분석' },
 ];
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const scheduler = getGlobalScheduler();
+    const scheduler = getScheduler();
     const stats = scheduler.getStats();
 
-    // 에이전트 상태 집계
     const agents: AgentInfo[] = agentDefinitions.map(def => {
-      // 실제로는 스케줄러에서 에이전트별 상태 추적
       const isRunning = stats.runningTasks > 0;
       
       return {
@@ -85,13 +68,12 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// 스케줄러 제어 (시작/중지)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { action } = body;
 
-    const scheduler = getGlobalScheduler();
+    const scheduler = getScheduler();
 
     switch (action) {
       case 'start':
