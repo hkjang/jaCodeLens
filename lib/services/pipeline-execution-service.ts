@@ -2,6 +2,11 @@
  * 파이프라인 실행 서비스 (간소화 버전)
  * 
  * 실제 분석 파이프라인을 실행하고 결과를 DB에 저장합니다.
+ * 
+ * 통합 기능:
+ * - 8단계 분석 파이프라인
+ * - 코드 요소 추출 및 저장 (AST_PARSE 단계)
+ * - 분석 결과 DB 저장
  */
 
 import prisma from '@/lib/db';
@@ -16,6 +21,7 @@ export interface AnalysisOptions {
   includeTests?: boolean;
   mode?: 'immediate' | 'scheduled';
   scheduledTime?: string;
+  extractElements?: boolean; // 코드 요소 추출 활성화
 }
 
 export interface AnalysisJob {
@@ -26,6 +32,7 @@ export interface AnalysisJob {
   startedAt: Date;
   completedAt?: Date;
   error?: string;
+  extractedElements?: number;
 }
 
 // 실행 중인 작업 추적
