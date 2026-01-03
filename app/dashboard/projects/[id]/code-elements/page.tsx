@@ -89,6 +89,34 @@ export default function ProjectCodeElementsPage() {
   // 단축키 모달
   const [showShortcuts, setShowShortcuts] = useState(false);
 
+  // 관련 이슈
+  const [elementIssues, setElementIssues] = useState<any[]>([]);
+  const [loadingIssues, setLoadingIssues] = useState(false);
+
+  // 선택된 요소 변경 시 이슈 로드
+  useEffect(() => {
+    if (selectedElement) {
+      loadElementIssues(selectedElement.id);
+    } else {
+      setElementIssues([]);
+    }
+  }, [selectedElement?.id]);
+
+  async function loadElementIssues(elementId: string) {
+    setLoadingIssues(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/code-elements/${elementId}/issues`);
+      if (res.ok) {
+        const data = await res.json();
+        setElementIssues(data.issues || []);
+      }
+    } catch (e) {
+      console.error('Failed to load issues', e);
+    } finally {
+      setLoadingIssues(false);
+    }
+  }
+
   // 키보드 단축키
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -750,7 +778,12 @@ export default function ProjectCodeElementsPage() {
             </div>
             <pre className={`p-4 text-sm text-gray-300 font-mono overflow-auto ${codePreviewFullscreen ? 'h-[calc(100%-3rem)]' : 'max-h-[500px]'}`}>
               <code>
-                {selectedElement.content || selectedElement.signature || `// ${selectedElement.elementType}: ${selectedElement.name}\n// Lines: ${selectedElement.lineStart}-${selectedElement.lineEnd}`}
+                {(selectedElement.content || selectedElement.signature || `// ${selectedElement.elementType}: ${selectedElement.name}`).split('\n').map((line, i) => (
+                  <div key={i} className="flex">
+                    <span className="select-none text-gray-500 text-right w-8 mr-4 flex-shrink-0">{selectedElement.lineStart + i}</span>
+                    <span className="flex-1">{line}</span>
+                  </div>
+                ))}
               </code>
             </pre>
           </div>
@@ -842,6 +875,39 @@ export default function ProjectCodeElementsPage() {
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* 관련 이슈 */}
+              {elementIssues.length > 0 && (
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+                    🔗 관련 분석 이슈 ({elementIssues.length})
+                  </h4>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {elementIssues.map((issue: any) => (
+                      <div key={issue.id} className="p-2 bg-gray-50 dark:bg-gray-700/50 rounded text-sm">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                            issue.severity === 'CRITICAL' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                            issue.severity === 'HIGH' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' :
+                            issue.severity === 'MEDIUM' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                            'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                          }`}>{issue.severity}</span>
+                          {issue.lineNumber && <span className="text-xs text-gray-500">Line {issue.lineNumber}</span>}
+                        </div>
+                        <p className="text-gray-700 dark:text-gray-300">{issue.message}</p>
+                        {issue.suggestion && (
+                          <p className="text-xs text-green-600 dark:text-green-400 mt-1">💡 {issue.suggestion}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {loadingIssues && (
+                <p className="text-xs text-gray-400 flex items-center gap-1">
+                  <Loader2 className="w-3 h-3 animate-spin" /> 이슈 로딩 중...
+                </p>
               )}
             </div>
           ) : (
