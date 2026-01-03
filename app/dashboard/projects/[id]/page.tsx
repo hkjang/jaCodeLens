@@ -7,7 +7,8 @@ import {
   ArrowLeft, ArrowUp, ArrowDown, Minus,
   Shield, BarChart3, Layers, Activity, TestTube, FileCode,
   AlertTriangle, CheckCircle, Clock, Zap, TrendingUp, TrendingDown,
-  ChevronRight, ExternalLink, PlayCircle, RefreshCw, Target
+  ChevronRight, ExternalLink, PlayCircle, RefreshCw, Target,
+  History, LineChart
 } from 'lucide-react';
 
 interface ProjectHealth {
@@ -107,13 +108,29 @@ export default function ProjectDetailPage() {
             <p className="text-gray-500 text-sm">{health.path}</p>
           </div>
         </div>
-        <Link
-          href={`/dashboard/execution?project=${projectId}`}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
-        >
-          <PlayCircle className="w-4 h-4" />
-          재분석
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/dashboard/projects/${projectId}/history`}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg"
+          >
+            <History className="w-4 h-4" />
+            이력
+          </Link>
+          <Link
+            href={`/dashboard/projects/${projectId}/history/trends`}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg"
+          >
+            <LineChart className="w-4 h-4" />
+            트렌드
+          </Link>
+          <Link
+            href={`/dashboard/execution?project=${projectId}`}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
+          >
+            <PlayCircle className="w-4 h-4" />
+            재분석
+          </Link>
+        </div>
       </div>
 
       {/* Health Score Hero */}

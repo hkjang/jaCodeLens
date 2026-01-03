@@ -201,22 +201,45 @@ model AnalysisExecute {
   id          String   @id @default(uuid())
   projectId   String
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  status      String   // "PENDING", "RUNNING", "COMPLETED", "FAILED"
+  status      String   // "PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"
   score       Float?
   report      String? // Markdown report
   startedAt   DateTime @default(now())
   completedAt DateTime?
+  
+  // Git 정보 (프로젝트 이력 추적)
+  gitBranch   String?  // 분석 시점 브랜치
+  gitCommit   String?  // 분석 시점 커밋 SHA
+  gitTag      String?  // 릴리즈 태그 (예: v1.0.0)
+  gitMessage  String?  // 커밋 메시지
   
   // Reliability & Operations
   inputHash   String?  // SHA-256 integrity check
   snapshotPath String? // Path to project snapshot
   environment String?  // "DEV", "STAGE", "PROD"
   
+  // 분석 설정 (JSON)
+  analysisConfig String? // 분석 시 사용된 설정 저장
+  
+  // 요약 통계 (빠른 조회용)
+  totalIssues     Int?
+  criticalCount   Int?
+  highCount       Int?
+  mediumCount     Int?
+  lowCount        Int?
+  
   results     AnalysisResult[]
   agentExecutions AgentExecution[]
   dependencies Dependency[]
   approvalWorkflows ApprovalWorkflow[]
   normalizedResults NormalizedAnalysisResult[]
+  snapshot    AnalysisSnapshot?
+  metrics     AnalysisMetric[]
+  tasks       ImprovementTask[]
+  
+  @@index([projectId, startedAt])
+  @@index([projectId, gitBranch])
+  @@index([projectId, gitTag])
 }
 
 model AnalysisResult {
@@ -603,4 +626,100 @@ model AdminPolicy {
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// --- 프로젝트 이력 관리: 분석 스냅샷 ---
+model AnalysisSnapshot {
+  id          String   @id @default(uuid())
+  executeId   String   @unique
+  execute     AnalysisExecute @relation(fields: [executeId], references: [id], onDelete: Cascade)
+  
+  // 스냅샷 정보
+  snapshotHash    String?   // 전체 결과 해시 (불변성 검증)
+  fileCount       Int       @default(0)
+  totalLines      Int       @default(0)
+  
+  // 스냅샷 데이터 (JSON)
+  languageStats   String?   // 언어별 통계
+  categoryStats   String?   // 카테고리별 통계
+  severityStats   String?   // 심각도별 통계
+  
+  // 비교용 데이터
+  issueFingerprints String? // 이슈 핑거프린트 목록 (비교 시 사용)
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([executeId])
+}
+
+// --- 프로젝트 이력 관리: 분석 메트릭 ---
+model AnalysisMetric {
+  id          String   @id @default(uuid())
+  executeId   String
+  execute     AnalysisExecute @relation(fields: [executeId], references: [id], onDelete: Cascade)
+  
+  // 메트릭 유형
+  metricType  String   // COMPLEXITY, COVERAGE, DEBT, RISK, QUALITY, SECURITY
+  metricName  String   // 구체적인 메트릭 이름
+  
+  // 값
+  value       Float
+  unit        String?  // %, count, score, hours, etc.
+  
+  // 추가 정보
+  target      String?  // 파일 또는 모듈 경로 (전체면 null)
+  details     String?  // JSON 상세 데이터
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([executeId, metricType])
+  @@index([executeId, metricName])
+}
+
+// --- 프로젝트 이력 관리: 개선 태스크 ---
+model ImprovementTask {
+  id          String   @id @default(uuid())
+  executeId   String
+  execute     AnalysisExecute @relation(fields: [executeId], references: [id], onDelete: Cascade)
+  
+  // 연결된 이슈
+  resultId    String?  // NormalizedAnalysisResult ID
+  
+  // 태스크 정보
+  title       String
+  description String?
+  category    String   // BUG, IMPROVEMENT, SECURITY, TECH_DEBT, REFACTORING
+  priority    String   @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  severity    String?  // 원본 이슈 심각도
+  
+  // 상태
+  status      String   @default("OPEN") // OPEN, IN_PROGRESS, RESOLVED, VERIFIED, WONT_FIX
+  
+  // 위치 정보
+  filePath    String?
+  lineStart   Int?
+  lineEnd     Int?
+  
+  // 담당자
+  assignedTo  String?
+  assignedAt  DateTime?
+  
+  // 해결 정보
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  verifiedAt  DateTime?  // 재분석으로 해결 confirmed
+  
+  // 연결
+  linkedCommit String?  // 해결한 커밋 SHA
+  
+  // 예상 공수
+  estimatedHours Float?
+  actualHours    Float?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([executeId, status])
+  @@index([executeId, priority])
+  @@index([resultId])
 }
