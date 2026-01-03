@@ -176,7 +176,8 @@ async function collectFiles(basePath: string): Promise<{ path: string; relativeP
     
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
-      const relativePath = path.relative(basePath, fullPath);
+      // Windows 경로를 Unix 스타일로 정규화 (\ -> /)
+      const relativePath = path.relative(basePath, fullPath).replace(/\\/g, '/');
 
       if (entry.isDirectory()) {
         if (!excludeDirs.includes(entry.name) && !entry.name.startsWith('.')) {

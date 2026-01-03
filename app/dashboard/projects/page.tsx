@@ -38,6 +38,9 @@ export default function ProjectsPage() {
   const [search, setSearch] = useState('');
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [showArchivedProjects, setShowArchivedProjects] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [sortBy, setSortBy] = useState<'name' | 'score' | 'date'>('date');
+  const [typeFilter, setTypeFilter] = useState<string>('');
   
   // CUD 상태
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -194,10 +197,28 @@ export default function ProjectsPage() {
     ];
   }
 
-  const filteredProjects = projects.filter(p => 
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    p.path.toLowerCase().includes(search.toLowerCase())
-  );
+  // 통계 계산
+  const stats = {
+    total: projects.length,
+    analyzed: projects.filter(p => p.lastAnalysis?.status === 'COMPLETED').length,
+    avgScore: Math.round(
+      projects.filter(p => p.lastAnalysis?.score).reduce((sum, p) => sum + (p.lastAnalysis?.score || 0), 0) /
+      (projects.filter(p => p.lastAnalysis?.score).length || 1)
+    ),
+    criticalIssues: projects.reduce((sum, p) => sum + (p.lastAnalysis?.criticalCount || 0), 0),
+    types: [...new Set(projects.map(p => p.type).filter(Boolean))] as string[]
+  };
+
+  const filteredProjects = projects
+    .filter(p => 
+      (p.name.toLowerCase().includes(search.toLowerCase()) || p.path.toLowerCase().includes(search.toLowerCase())) &&
+      (!typeFilter || p.type === typeFilter)
+    )
+    .sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name);
+      if (sortBy === 'score') return (b.lastAnalysis?.score || 0) - (a.lastAnalysis?.score || 0);
+      return new Date(b.lastAnalysis?.date || 0).getTime() - new Date(a.lastAnalysis?.date || 0).getTime();
+    });
 
   if (loading) {
     return (
@@ -245,19 +266,90 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {/* Search & Filter */}
+      {/* 통계 요약 카드 */}
       {projects.length > 0 && (
-        <div className="flex items-center justify-between gap-4">
-          <div className="relative flex-1 max-w-md">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
+              <FolderGit2 className="w-4 h-4" />
+              전체 프로젝트
+            </div>
+            <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.total}</div>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-green-200 dark:border-green-800">
+            <div className="flex items-center gap-2 text-green-500 text-sm mb-1">
+              <CheckCircle className="w-4 h-4" />
+              분석 완료
+            </div>
+            <div className="text-2xl font-bold text-green-600">{stats.analyzed}</div>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-blue-200 dark:border-blue-800">
+            <div className="flex items-center gap-2 text-blue-500 text-sm mb-1">
+              <BarChart3 className="w-4 h-4" />
+              평균 점수
+            </div>
+            <div className="text-2xl font-bold text-blue-600">{stats.avgScore || '-'}</div>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-red-200 dark:border-red-800">
+            <div className="flex items-center gap-2 text-red-500 text-sm mb-1">
+              <AlertTriangle className="w-4 h-4" />
+              Critical 이슈
+            </div>
+            <div className="text-2xl font-bold text-red-600">{stats.criticalIssues}</div>
+          </div>
+        </div>
+      )}
+
+      {/* 검색/필터/정렬 바 */}
+      {projects.length > 0 && (
+        <div className="flex items-center gap-4 p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
               placeholder="프로젝트 검색..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900"
             />
           </div>
+
+          <select 
+            value={typeFilter} 
+            onChange={(e) => setTypeFilter(e.target.value)}
+            className="px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
+          >
+            <option value="">모든 유형</option>
+            {stats.types.map(t => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+
+          <select 
+            value={sortBy} 
+            onChange={(e) => setSortBy(e.target.value as 'name' | 'score' | 'date')}
+            className="px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
+          >
+            <option value="date">최근 분석순</option>
+            <option value="name">이름순</option>
+            <option value="score">점수순</option>
+          </select>
+
+          <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`px-3 py-1.5 rounded text-sm ${viewMode === 'grid' ? 'bg-white dark:bg-gray-600 shadow' : ''}`}
+            >
+              카드
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-3 py-1.5 rounded text-sm ${viewMode === 'list' ? 'bg-white dark:bg-gray-600 shadow' : ''}`}
+            >
+              목록
+            </button>
+          </div>
+
           <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
             <input
               type="checkbox"
@@ -265,13 +357,14 @@ export default function ProjectsPage() {
               onChange={(e) => setShowArchivedProjects(e.target.checked)}
               className="rounded border-gray-300"
             />
-            아카이브 포함
+            아카이브
           </label>
         </div>
       )}
 
+
       {/* Projects Grid */}
-      {filteredProjects.length > 0 && (
+      {viewMode === 'grid' && filteredProjects.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredProjects.map((project) => (
             <div 
@@ -402,28 +495,107 @@ export default function ProjectsPage() {
 
               {/* Actions */}
               <div className="p-4 flex items-center justify-between border-t border-gray-100 dark:border-gray-700">
-                <button
-                  onClick={(e) => startAnalysis(project.id, e)}
-                  disabled={selectedProject === project.id || project.status === 'archived'}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white text-sm rounded-lg transition-colors"
-                >
-                  {selectedProject === project.id ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <PlayCircle className="w-4 h-4" />
-                  )}
-                  분석 시작
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={(e) => startAnalysis(project.id, e)}
+                    disabled={selectedProject === project.id || project.status === 'archived'}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white text-xs rounded-lg transition-colors"
+                  >
+                    {selectedProject === project.id ? (
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <PlayCircle className="w-3 h-3" />
+                    )}
+                    분석
+                  </button>
+                  <Link 
+                    href={`/dashboard/projects/${project.id}/code-elements`}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    <FolderGit2 className="w-3 h-3" />
+                    코드
+                  </Link>
+                  <Link 
+                    href={`/dashboard/projects/${project.id}/results`}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    <BarChart3 className="w-3 h-3" />
+                    결과
+                  </Link>
+                </div>
                 <Link 
                   href={`/dashboard/projects/${project.id}`}
-                  className="flex items-center gap-2 text-gray-400 hover:text-blue-500 transition-colors"
+                  className="flex items-center gap-1 text-gray-400 hover:text-blue-500 transition-colors"
                 >
-                  <span className="text-xs">상세 보기</span>
                   <ExternalLink className="w-4 h-4" />
                 </Link>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Projects List View */}
+      {viewMode === 'list' && filteredProjects.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-50 dark:bg-gray-900">
+              <tr>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">프로젝트</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">유형</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">점수</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">이슈</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase">최근 분석</th>
+                <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase">액션</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              {filteredProjects.map(project => (
+                <tr key={project.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                  <td className="px-4 py-3">
+                    <Link href={`/dashboard/projects/${project.id}`} className="flex items-center gap-3">
+                      <FolderGit2 className="w-5 h-5 text-gray-400" />
+                      <div>
+                        <div className="font-medium text-gray-900 dark:text-white">{project.name}</div>
+                        <div className="text-xs text-gray-500 truncate max-w-[200px]">{project.path}</div>
+                      </div>
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 text-xs rounded">{project.type || '-'}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {project.lastAnalysis?.score ? (
+                      <span className={`font-bold ${project.lastAnalysis.score >= 80 ? 'text-green-500' : project.lastAnalysis.score >= 60 ? 'text-yellow-500' : 'text-red-500'}`}>
+                        {project.lastAnalysis.score}
+                      </span>
+                    ) : '-'}
+                  </td>
+                  <td className="px-4 py-3">
+                    {project.lastAnalysis?.issueCount ? (
+                      <span className="text-sm text-gray-600 dark:text-gray-400">{project.lastAnalysis.issueCount}건</span>
+                    ) : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-500">
+                    {project.lastAnalysis?.date ? new Date(project.lastAnalysis.date).toLocaleDateString('ko-KR') : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <Link href={`/dashboard/projects/${project.id}/code-elements`} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" title="코드 요소">
+                        <FolderGit2 className="w-4 h-4 text-gray-400" />
+                      </Link>
+                      <Link href={`/dashboard/projects/${project.id}/results`} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" title="분석 결과">
+                        <BarChart3 className="w-4 h-4 text-gray-400" />
+                      </Link>
+                      <button onClick={(e) => startAnalysis(project.id, e)} className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded" title="분석 시작">
+                        <PlayCircle className="w-4 h-4 text-blue-500" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
