@@ -393,6 +393,7 @@ export default function ProjectCodeElementsPage() {
                 ['1', '목록 뷰'],
                 ['2', '트리 뷰'],
                 ['3', '복잡도 뷰'],
+                ['4', '그래프 뷰'],
                 ['ESC', '모달 닫기'],
               ].map(([key, desc]) => (
                 <div key={key} className="flex justify-between py-1">
@@ -441,6 +442,13 @@ export default function ProjectCodeElementsPage() {
               <button onClick={exportToJSON} className="flex items-center gap-2 px-4 py-2 w-full text-left hover:bg-gray-50 dark:hover:bg-gray-700 text-sm">
                 <FileJson className="w-4 h-4" /> JSON
               </button>
+              <a 
+                href={`/api/projects/${projectId}/report?format=html`}
+                target="_blank"
+                className="flex items-center gap-2 px-4 py-2 w-full text-left hover:bg-gray-50 dark:hover:bg-gray-700 text-sm"
+              >
+                <FileText className="w-4 h-4" /> HTML 리포트
+              </a>
             </div>
           </div>
 
