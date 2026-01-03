@@ -374,16 +374,14 @@ export class TriggerService {
     const completedTasks = agentProgress.reduce((s, a) => s + (a.tasksCompleted || (a.status === 'COMPLETED' ? 1 : 0)), 0);
     
     // Get estimated file count from project (if available)
-    let estimatedFileCount = 0;
+    let estimatedFileCount = 50;  // Default estimate
     let projectName = '';
     try {
       if (trigger.selfProject?.project) {
         const project = trigger.selfProject.project;
         projectName = project.name;
-        // Calculate estimated file count from project stats or use default
-        // Try to get fileCount from project summary or use estimate
-        const stats = project.summary ? JSON.parse(project.summary) : null;
-        estimatedFileCount = stats?.fileCount || stats?.totalFiles || 50; // Default estimate
+        // Use default estimate since Project doesn't have summary field
+        estimatedFileCount = 50;
       }
     } catch (e) {
       estimatedFileCount = 50; // Fallback

@@ -16,7 +16,8 @@ export interface AgentConfigData {
   priority: number;
   isEnabled: boolean;
   timeout: number;
-  promptKey: string | null;
+  promptId: string | null;
+  promptKey: string | null;  // Computed from prompt relation
   modelId: string | null;
 }
 
@@ -81,7 +82,8 @@ class AgentConfigService {
 
     try {
       const configs = await prisma.agentConfig.findMany({
-        orderBy: { priority: 'asc' }
+        orderBy: { priority: 'asc' },
+        include: { prompt: true }  // Include prompt relation to get key
       });
 
       this.configCache.clear();
@@ -95,7 +97,8 @@ class AgentConfigService {
           priority: config.priority,
           isEnabled: config.isEnabled,
           timeout: config.timeout,
-          promptKey: config.promptKey,
+          promptId: config.promptId,
+          promptKey: config.prompt?.key || null,  // Get key from prompt relation
           modelId: config.modelId
         });
       }
@@ -116,12 +119,12 @@ class AgentConfigService {
    */
   private loadDefaults(): void {
     const defaults: AgentConfigData[] = [
-      { id: '', name: 'StructureAnalysisAgent', displayName: '구조 분석', description: null, category: 'ANALYSIS', priority: 1, isEnabled: true, timeout: 120, promptKey: 'agent.structure', modelId: null },
-      { id: '', name: 'QualityAnalysisAgent', displayName: '품질 분석', description: null, category: 'QUALITY', priority: 2, isEnabled: true, timeout: 120, promptKey: 'agent.quality', modelId: null },
-      { id: '', name: 'SecurityAnalysisAgent', displayName: '보안 분석', description: null, category: 'SECURITY', priority: 3, isEnabled: true, timeout: 120, promptKey: 'agent.security', modelId: null },
-      { id: '', name: 'DependencyAnalysisAgent', displayName: '의존성 분석', description: null, category: 'ANALYSIS', priority: 4, isEnabled: true, timeout: 60, promptKey: 'agent.dependency', modelId: null },
-      { id: '', name: 'StyleAnalysisAgent', displayName: '스타일 분석', description: null, category: 'QUALITY', priority: 5, isEnabled: true, timeout: 60, promptKey: 'agent.style', modelId: null },
-      { id: '', name: 'TestAnalysisAgent', displayName: '테스트 분석', description: null, category: 'QUALITY', priority: 6, isEnabled: true, timeout: 60, promptKey: 'agent.test', modelId: null },
+      { id: '', name: 'StructureAnalysisAgent', displayName: '구조 분석', description: null, category: 'ANALYSIS', priority: 1, isEnabled: true, timeout: 120, promptId: null, promptKey: 'agent.structure', modelId: null },
+      { id: '', name: 'QualityAnalysisAgent', displayName: '품질 분석', description: null, category: 'QUALITY', priority: 2, isEnabled: true, timeout: 120, promptId: null, promptKey: 'agent.quality', modelId: null },
+      { id: '', name: 'SecurityAnalysisAgent', displayName: '보안 분석', description: null, category: 'SECURITY', priority: 3, isEnabled: true, timeout: 120, promptId: null, promptKey: 'agent.security', modelId: null },
+      { id: '', name: 'DependencyAnalysisAgent', displayName: '의존성 분석', description: null, category: 'ANALYSIS', priority: 4, isEnabled: true, timeout: 60, promptId: null, promptKey: 'agent.dependency', modelId: null },
+      { id: '', name: 'StyleAnalysisAgent', displayName: '스타일 분석', description: null, category: 'QUALITY', priority: 5, isEnabled: true, timeout: 60, promptId: null, promptKey: 'agent.style', modelId: null },
+      { id: '', name: 'TestAnalysisAgent', displayName: '테스트 분석', description: null, category: 'QUALITY', priority: 6, isEnabled: true, timeout: 60, promptId: null, promptKey: 'agent.test', modelId: null },
     ];
 
     for (const config of defaults) {

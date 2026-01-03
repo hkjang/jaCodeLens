@@ -1,35 +1,23 @@
-'use client';
+import { GitBranch, AlertTriangle, CheckCircle, Package, RefreshCw, Link2 } from 'lucide-react';
+import Link from 'next/link';
+import { getDependencyGraph, getDashboardStats } from '@/lib/services/pipeline-data-service';
 
-import { GitBranch, AlertTriangle, CheckCircle, Package } from 'lucide-react';
-import { motion } from 'framer-motion';
+export const dynamic = 'force-dynamic';
 
-const mockDependencies = [
-  { name: 'react', version: '18.2.0', latest: '18.2.0', status: 'up-to-date', type: 'production' },
-  { name: 'next', version: '16.1.0', latest: '16.1.0', status: 'up-to-date', type: 'production' },
-  { name: 'typescript', version: '5.3.0', latest: '5.7.2', status: 'outdated', type: 'dev' },
-  { name: 'prisma', version: '7.2.0', latest: '7.2.0', status: 'up-to-date', type: 'production' },
-  { name: 'lodash', version: '4.17.20', latest: '4.17.21', status: 'minor-update', type: 'production' },
-  { name: 'axios', version: '0.27.0', latest: '1.7.2', status: 'major-update', type: 'production' },
-  { name: 'framer-motion', version: '11.0.0', latest: '11.15.0', status: 'minor-update', type: 'production' },
-  { name: 'recharts', version: '2.15.0', latest: '2.15.0', status: 'up-to-date', type: 'production' },
-];
+export default async function DependenciesPage() {
+  const [depGraph, stats] = await Promise.all([
+    getDependencyGraph(),
+    getDashboardStats()
+  ]);
 
-const statusConfig = {
-  'up-to-date': { icon: CheckCircle, color: 'text-green-500', bg: 'bg-green-50 dark:bg-green-900/20', label: '최신' },
-  'minor-update': { icon: AlertTriangle, color: 'text-yellow-500', bg: 'bg-yellow-50 dark:bg-yellow-900/20', label: '마이너 업데이트' },
-  'major-update': { icon: AlertTriangle, color: 'text-orange-500', bg: 'bg-orange-50 dark:bg-orange-900/20', label: '메이저 업데이트' },
-  'outdated': { icon: AlertTriangle, color: 'text-red-500', bg: 'bg-red-50 dark:bg-red-900/20', label: '구버전' },
-};
-
-export default function DependenciesPage() {
-  const upToDate = mockDependencies.filter(d => d.status === 'up-to-date').length;
-  const needsUpdate = mockDependencies.length - upToDate;
+  const hasData = depGraph.nodes.length > 0 || depGraph.circularDeps.length > 0;
+  const circularCount = depGraph.circularDeps.length;
 
   return (
     <div className="space-y-6">
       <header>
         <h2 className="text-3xl font-bold text-gray-900 dark:text-white">의존성</h2>
-        <p className="text-gray-500">프로젝트 패키지 의존성을 관리합니다</p>
+        <p className="text-gray-500">프로젝트 모듈 간 의존성을 분석합니다</p>
       </header>
 
       {/* Summary */}
@@ -38,70 +26,117 @@ export default function DependenciesPage() {
           <div className="flex items-center gap-3">
             <Package className="w-8 h-8 text-blue-500" />
             <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{mockDependencies.length}</p>
-              <p className="text-sm text-gray-500">전체 패키지</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{depGraph.nodes.length}</p>
+              <p className="text-sm text-gray-500">분석된 모듈</p>
             </div>
           </div>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-3">
-            <CheckCircle className="w-8 h-8 text-green-500" />
+            <Link2 className="w-8 h-8 text-purple-500" />
             <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{upToDate}</p>
-              <p className="text-sm text-gray-500">최신 버전</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{depGraph.edges.length}</p>
+              <p className="text-sm text-gray-500">의존성 연결</p>
             </div>
           </div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+        <div className={`bg-white dark:bg-gray-800 rounded-xl p-6 border ${
+          circularCount > 0 ? 'border-red-200 dark:border-red-800' : 'border-gray-200 dark:border-gray-700'
+        }`}>
           <div className="flex items-center gap-3">
-            <AlertTriangle className="w-8 h-8 text-yellow-500" />
+            <RefreshCw className={`w-8 h-8 ${circularCount > 0 ? 'text-red-500' : 'text-green-500'}`} />
             <div>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{needsUpdate}</p>
-              <p className="text-sm text-gray-500">업데이트 필요</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{circularCount}</p>
+              <p className="text-sm text-gray-500">순환 의존성</p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Dependency List */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div className="grid grid-cols-5 gap-4 p-4 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-500">
-          <span>패키지</span>
-          <span>현재 버전</span>
-          <span>최신 버전</span>
-          <span>타입</span>
-          <span>상태</span>
+      {/* Circular Dependencies Warning */}
+      {circularCount > 0 && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5" />
+            <div>
+              <h3 className="font-medium text-red-700 dark:text-red-300">순환 의존성 감지됨</h3>
+              <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                순환 의존성은 코드 유지보수를 어렵게 만듭니다. 아래 순환 경로를 확인하고 리팩토링을 고려하세요.
+              </p>
+            </div>
+          </div>
         </div>
-        <div className="divide-y divide-gray-100 dark:divide-gray-700">
-          {mockDependencies.map((dep, index) => {
-            const config = statusConfig[dep.status as keyof typeof statusConfig];
-            const StatusIcon = config.icon;
-            return (
-              <motion.div
-                key={dep.name}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.05 }}
-                className="grid grid-cols-5 gap-4 p-4 items-center hover:bg-gray-50 dark:hover:bg-gray-700/50"
-              >
-                <span className="font-medium text-gray-900 dark:text-white flex items-center gap-2">
-                  <GitBranch className="w-4 h-4 text-gray-400" />
-                  {dep.name}
-                </span>
-                <span className="text-gray-600 dark:text-gray-400">{dep.version}</span>
-                <span className="text-gray-600 dark:text-gray-400">{dep.latest}</span>
-                <span className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 w-fit">
-                  {dep.type}
-                </span>
-                <span className={`flex items-center gap-2 ${config.color}`}>
-                  <StatusIcon className="w-4 h-4" />
-                  <span className="text-sm">{config.label}</span>
-                </span>
-              </motion.div>
-            );
-          })}
+      )}
+
+      {/* Circular Dependencies List */}
+      {depGraph.circularDeps.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="font-semibold text-gray-900 dark:text-white">순환 의존성 경로</h3>
+          </div>
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {depGraph.circularDeps.map((cycle, index) => (
+              <div key={index} className="p-4">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {cycle.map((node, nodeIndex) => (
+                    <span key={nodeIndex} className="flex items-center gap-2">
+                      <span className="px-3 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg text-sm font-mono">
+                        {node}
+                      </span>
+                      {nodeIndex < cycle.length - 1 && (
+                        <span className="text-gray-400">→</span>
+                      )}
+                    </span>
+                  ))}
+                  <span className="text-gray-400">→ (순환)</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Dependency Edges */}
+      {depGraph.edges.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700">
+            <h3 className="font-semibold text-gray-900 dark:text-white">의존성 목록</h3>
+          </div>
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {depGraph.edges.slice(0, 20).map((edge, index) => (
+              <div key={index} className="px-4 py-3 flex items-center gap-3">
+                <span className="font-mono text-sm text-gray-700 dark:text-gray-300">{edge.from}</span>
+                <span className="text-gray-400">→</span>
+                <span className="font-mono text-sm text-gray-700 dark:text-gray-300">{edge.to}</span>
+                {edge.isCircular && (
+                  <span className="px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded text-xs">
+                    순환
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* No Data State */}
+      {!hasData && (
+        <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+          <GitBranch className="w-16 h-16 mx-auto text-gray-400 mb-4" />
+          <h3 className="text-xl font-medium text-gray-700 dark:text-gray-300">
+            의존성 정보가 없습니다
+          </h3>
+          <p className="text-gray-500 mt-2 mb-6">
+            분석을 실행하면 의존성 그래프가 여기에 표시됩니다
+          </p>
+          <Link 
+            href="/dashboard/execution"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            분석 실행하기
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

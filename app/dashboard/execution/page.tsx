@@ -52,8 +52,7 @@ async function getExecutions() {
             error: s.error || undefined,
             duration: s.startedAt && s.completedAt 
               ? new Date(s.completedAt).getTime() - new Date(s.startedAt).getTime()
-              : undefined,
-            icon: () => null // Placeholder, actual icon handled in component
+              : undefined
           })),
           resultCount,
           agentExecutions: [] as any[]

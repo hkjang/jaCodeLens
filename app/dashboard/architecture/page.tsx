@@ -1,28 +1,35 @@
-'use client';
+import { Layers, AlertTriangle, CheckCircle, ZoomIn, ZoomOut, Maximize, FileCode } from 'lucide-react';
+import Link from 'next/link';
+import { getArchitectureModules, getDashboardStats } from '@/lib/services/pipeline-data-service';
 
-import { Layers, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
-import { motion } from 'framer-motion';
-import { useState } from 'react';
+export const dynamic = 'force-dynamic';
 
-const mockModules = [
-  { id: 'api', name: 'API Layer', type: 'api', dependencies: ['services'], issues: 3 },
-  { id: 'services', name: 'Services', type: 'service', dependencies: ['core', 'utils'], issues: 5 },
-  { id: 'core', name: 'Core', type: 'core', dependencies: [], issues: 1 },
-  { id: 'utils', name: 'Utilities', type: 'util', dependencies: [], issues: 2 },
-  { id: 'auth', name: 'Auth Module', type: 'service', dependencies: ['core'], issues: 0 },
-  { id: 'payments', name: 'Payments', type: 'service', dependencies: ['api', 'core'], issues: 4 },
-];
-
+// 모듈 타입별 색상
 const typeColors: Record<string, string> = {
   api: 'bg-blue-500',
   service: 'bg-purple-500',
+  component: 'bg-indigo-500',
   core: 'bg-green-500',
   util: 'bg-yellow-500',
+  model: 'bg-pink-500',
+  module: 'bg-gray-500',
 };
 
-export default function ArchitecturePage() {
-  const [selectedModule, setSelectedModule] = useState<string | null>(null);
-  const [zoom, setZoom] = useState(1);
+export default async function ArchitecturePage() {
+  const [modules, stats] = await Promise.all([
+    getArchitectureModules(),
+    getDashboardStats()
+  ]);
+
+  const structureIssues = stats.byCategory?.STRUCTURE || 0;
+  const hasModules = modules.length > 0;
+
+  // 모듈을 타입별로 그룹핑
+  const byType = modules.reduce((acc, mod) => {
+    if (!acc[mod.type]) acc[mod.type] = [];
+    acc[mod.type].push(mod);
+    return acc;
+  }, {} as Record<string, typeof modules>);
 
   return (
     <div className="space-y-6">
@@ -31,130 +38,102 @@ export default function ArchitecturePage() {
           <h2 className="text-3xl font-bold text-gray-900 dark:text-white">아키텍처</h2>
           <p className="text-gray-500">시스템 구조와 모듈 의존성을 시각화합니다</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}
-            className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
-          >
-            <ZoomOut className="w-4 h-4" />
-          </button>
-          <span className="text-sm text-gray-500">{Math.round(zoom * 100)}%</span>
-          <button 
-            onClick={() => setZoom(z => Math.min(1.5, z + 0.1))}
-            className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
-          >
-            <ZoomIn className="w-4 h-4" />
-          </button>
-          <button className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700">
-            <Maximize className="w-4 h-4" />
-          </button>
-        </div>
+        {structureIssues > 0 && (
+          <div className="flex items-center gap-2 px-4 py-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+            <AlertTriangle className="w-5 h-5 text-orange-500" />
+            <span className="text-orange-700 dark:text-orange-300 font-medium">
+              {structureIssues}개 구조 이슈
+            </span>
+          </div>
+        )}
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Architecture Diagram */}
-        <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700 min-h-[400px]">
-          <div style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }} className="transition-transform">
-            <div className="flex flex-col items-center gap-8 py-8">
-              {/* API Layer */}
-              <div className="flex gap-4">
-                {mockModules.filter(m => m.type === 'api').map(module => (
-                  <motion.button
-                    key={module.id}
-                    whileHover={{ scale: 1.05 }}
-                    onClick={() => setSelectedModule(module.id)}
-                    className={`px-6 py-4 rounded-xl text-white font-medium shadow-lg ${typeColors[module.type]} ${selectedModule === module.id ? 'ring-4 ring-blue-300' : ''}`}
-                  >
-                    {module.name}
-                    {module.issues > 0 && (
-                      <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">{module.issues}</span>
-                    )}
-                  </motion.button>
-                ))}
+      {hasModules ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Architecture Diagram */}
+          <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700 min-h-[400px]">
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-6">모듈 구조</h3>
+            
+            <div className="flex flex-col items-center gap-8 py-4">
+              {Object.entries(byType).map(([type, typeModules], typeIndex) => (
+                <div key={type} className="w-full">
+                  <div className="text-xs text-gray-400 uppercase tracking-wide mb-2 text-center">
+                    {type}
+                  </div>
+                  <div className="flex gap-4 flex-wrap justify-center">
+                    {typeModules.map(module => (
+                      <div
+                        key={module.name}
+                        className={`px-6 py-4 rounded-xl text-white font-medium shadow-lg transition-transform hover:scale-105 ${typeColors[module.type] || typeColors.module}`}
+                      >
+                        {module.name}
+                        {module.issueCount > 0 && (
+                          <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">
+                            {module.issueCount}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {typeIndex < Object.keys(byType).length - 1 && (
+                    <div className="w-0.5 h-8 bg-gray-300 dark:bg-gray-600 mx-auto mt-4" />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Module Stats */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-4">모듈 통계</h3>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <span className="text-gray-600 dark:text-gray-400">총 모듈</span>
+                <span className="font-bold text-gray-900 dark:text-white">{modules.length}</span>
               </div>
-              
-              {/* Arrow */}
-              <div className="w-0.5 h-8 bg-gray-300 dark:bg-gray-600" />
-              
-              {/* Services Layer */}
-              <div className="flex gap-4 flex-wrap justify-center">
-                {mockModules.filter(m => m.type === 'service').map(module => (
-                  <motion.button
-                    key={module.id}
-                    whileHover={{ scale: 1.05 }}
-                    onClick={() => setSelectedModule(module.id)}
-                    className={`px-6 py-4 rounded-xl text-white font-medium shadow-lg ${typeColors[module.type]} ${selectedModule === module.id ? 'ring-4 ring-purple-300' : ''}`}
-                  >
-                    {module.name}
-                    {module.issues > 0 && (
-                      <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">{module.issues}</span>
-                    )}
-                  </motion.button>
-                ))}
+              <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <span className="text-gray-600 dark:text-gray-400">이슈 있는 모듈</span>
+                <span className="font-bold text-orange-500">
+                  {modules.filter(m => m.issueCount > 0).length}
+                </span>
               </div>
-              
-              {/* Arrow */}
-              <div className="w-0.5 h-8 bg-gray-300 dark:bg-gray-600" />
-              
-              {/* Core & Utils */}
-              <div className="flex gap-4">
-                {mockModules.filter(m => m.type === 'core' || m.type === 'util').map(module => (
-                  <motion.button
-                    key={module.id}
-                    whileHover={{ scale: 1.05 }}
-                    onClick={() => setSelectedModule(module.id)}
-                    className={`px-6 py-4 rounded-xl text-white font-medium shadow-lg ${typeColors[module.type]} ${selectedModule === module.id ? 'ring-4 ring-green-300' : ''}`}
-                  >
-                    {module.name}
-                    {module.issues > 0 && (
-                      <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">{module.issues}</span>
-                    )}
-                  </motion.button>
-                ))}
+              <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <span className="text-gray-600 dark:text-gray-400">총 구조 이슈</span>
+                <span className="font-bold text-red-500">{structureIssues}</span>
               </div>
+            </div>
+
+            <h4 className="font-medium text-gray-700 dark:text-gray-300 mt-6 mb-3">타입별</h4>
+            <div className="space-y-2">
+              {Object.entries(byType).map(([type, typeModules]) => (
+                <div key={type} className="flex items-center gap-2">
+                  <div className={`w-3 h-3 rounded ${typeColors[type] || 'bg-gray-500'}`} />
+                  <span className="text-sm text-gray-600 dark:text-gray-400 flex-1">{type}</span>
+                  <span className="text-sm font-medium text-gray-900 dark:text-white">
+                    {typeModules.length}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
-
-        {/* Module Details */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-200 dark:border-gray-700">
-          <h3 className="font-semibold text-gray-900 dark:text-white mb-4">모듈 상세</h3>
-          {selectedModule ? (
-            <div className="space-y-4">
-              {(() => {
-                const module = mockModules.find(m => m.id === selectedModule);
-                if (!module) return null;
-                return (
-                  <>
-                    <div>
-                      <span className="text-sm text-gray-500">이름</span>
-                      <p className="font-medium text-gray-900 dark:text-white">{module.name}</p>
-                    </div>
-                    <div>
-                      <span className="text-sm text-gray-500">타입</span>
-                      <p className="font-medium text-gray-900 dark:text-white capitalize">{module.type}</p>
-                    </div>
-                    <div>
-                      <span className="text-sm text-gray-500">의존성</span>
-                      <p className="font-medium text-gray-900 dark:text-white">
-                        {module.dependencies.length > 0 ? module.dependencies.join(', ') : '없음'}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-sm text-gray-500">이슈</span>
-                      <p className={`font-medium ${module.issues > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                        {module.issues}개
-                      </p>
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-          ) : (
-            <p className="text-gray-500 text-sm">모듈을 선택하면 상세 정보가 표시됩니다</p>
-          )}
+      ) : (
+        <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+          <Layers className="w-16 h-16 mx-auto text-gray-400 mb-4" />
+          <h3 className="text-xl font-medium text-gray-700 dark:text-gray-300">
+            아키텍처 정보가 없습니다
+          </h3>
+          <p className="text-gray-500 mt-2 mb-6">
+            분석을 실행하면 프로젝트 구조가 여기에 표시됩니다
+          </p>
+          <Link 
+            href="/dashboard/execution"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            분석 실행하기
+          </Link>
         </div>
-      </div>
+      )}
     </div>
   );
 }

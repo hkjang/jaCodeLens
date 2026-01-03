@@ -29,7 +29,7 @@ import { useRole, UserRole, roleConfigs } from '@/lib/contexts/RoleContext';
 
 const allMenuItems = {
   dashboard: { href: '/dashboard', icon: <LayoutDashboard className="w-4 h-4" />, label: '대시보드' },
-  execution: { href: '/dashboard/execution', icon: <PlayCircle className="w-4 h-4" />, label: '분석 실행' },
+  execution: { href: '/dashboard/execution', icon: <PlayCircle className="w-4 h-4" />, label: '파이프라인 실행' },
   results: { href: '/dashboard/results', icon: <BarChart3 className="w-4 h-4" />, label: '분석 결과' },
   'code-issues': { href: '/dashboard/analysis', icon: <Code2 className="w-4 h-4" />, label: '코드 이슈' },
   improvements: { href: '/dashboard/improvements', icon: <Lightbulb className="w-4 h-4" />, label: '개선 제안' },
@@ -59,9 +59,10 @@ const allMenuItems = {
 };
 
 const menuSections: Record<string, { title: string; items: string[] }> = {
-  analysis: { title: '분석', items: ['dashboard', 'execution', 'results', 'code-issues', 'improvements', 'architecture', 'dependencies', 'risk-heatmap', 'history'] },
+  pipeline: { title: '파이프라인', items: ['dashboard', 'execution', 'results'] },
+  analysis: { title: '분석 결과', items: ['code-issues', 'improvements', 'architecture', 'dependencies', 'risk-heatmap'] },
   selfAnalysis: { title: 'Self Analysis', items: ['self-analysis', 'self-baseline', 'self-backlog', 'self-policy', 'code-elements'] },
-  operations: { title: '운영', items: ['operations', 'agents', 'queue', 'resources', 'logs', 'approvals', 'notifications'] },
+  operations: { title: '운영', items: ['operations', 'agents', 'queue', 'resources', 'logs', 'approvals', 'notifications', 'history'] },
   admin: { title: '관리', items: ['admin-roles', 'admin-policies', 'admin-agents', 'admin-models', 'admin-audit', 'reports', 'settings'] },
 };
 

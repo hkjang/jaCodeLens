@@ -1,361 +1,246 @@
-import { createClient } from '@libsql/client';
-import { randomUUID } from 'crypto';
+import prisma from '../lib/db';
 
-const libsql = createClient({
-  url: 'file:./prisma/dev.db',
-});
+// Realistic analysis results for pipeline
+const pipelineResults = {
+  typescript: [
+    { mainCat: 'SECURITY', subCat: 'INJECTION', ruleId: 'SEC001', severity: 'CRITICAL', msg: 'SQL Injection 취약점: 사용자 입력이 직접 쿼리에 삽입됨', suggestion: 'prisma 또는 parameterized query를 사용하세요', file: 'src/api/users.ts', line: 45 },
+    { mainCat: 'SECURITY', subCat: 'XSS', ruleId: 'SEC002', severity: 'HIGH', msg: 'XSS 취약점: dangerouslySetInnerHTML에 sanitize되지 않은 데이터 전달', suggestion: 'DOMPurify.sanitize()로 먼저 정제하세요', file: 'src/components/ArticleView.tsx', line: 67 },
+    { mainCat: 'SECURITY', subCat: 'SECRETS', ruleId: 'SEC003', severity: 'CRITICAL', msg: 'API 키가 코드에 하드코딩됨', suggestion: '환경 변수로 이동하고 .env.example 업데이트', file: 'src/config/api.ts', line: 12 },
+    { mainCat: 'SECURITY', subCat: 'CRYPTO', ruleId: 'SEC004', severity: 'HIGH', msg: 'MD5 해시 알고리즘은 보안에 취약함', suggestion: 'bcrypt 또는 argon2로 교체하세요', file: 'src/auth/password.ts', line: 23 },
+    { mainCat: 'QUALITY', subCat: 'COMPLEXITY', ruleId: 'QUA001', severity: 'HIGH', msg: 'Cyclomatic complexity가 25로 임계값(15) 초과', suggestion: '함수를 더 작은 단위로 분리하세요', file: 'src/utils/parser.ts', line: 89 },
+    { mainCat: 'QUALITY', subCat: 'DUPLICATION', ruleId: 'QUA002', severity: 'MEDIUM', msg: '15줄 이상의 중복 코드 블록 발견', suggestion: '공통 함수로 추출하세요', file: 'src/services/order.ts', line: 120 },
+    { mainCat: 'QUALITY', subCat: 'NAMING', ruleId: 'QUA003', severity: 'LOW', msg: '함수명이 camelCase 컨벤션을 따르지 않음', suggestion: 'process_user_data → processUserData', file: 'src/utils/helpers.ts', line: 15 },
+    { mainCat: 'STRUCTURE', subCat: 'CIRCULAR', ruleId: 'STR001', severity: 'HIGH', msg: '순환 의존성 감지: auth → user → auth', suggestion: '의존성 방향을 재설계하거나 중간 레이어 도입', file: 'src/modules/auth/index.ts', line: 1 },
+    { mainCat: 'STRUCTURE', subCat: 'LAYER', ruleId: 'STR002', severity: 'MEDIUM', msg: 'UI 레이어에서 직접 DB 접근', suggestion: 'Service 레이어를 통해 접근하세요', file: 'src/components/UserList.tsx', line: 34 },
+    { mainCat: 'STRUCTURE', subCat: 'COUPLING', ruleId: 'STR003', severity: 'MEDIUM', msg: 'God class: 파일에 1500줄 이상의 코드', suggestion: '관심사 분리를 통해 여러 파일로 분리', file: 'src/services/DataManager.ts', line: 1 },
+    { mainCat: 'OPERATIONS', subCat: 'LOGGING', ruleId: 'OPS001', severity: 'MEDIUM', msg: 'catch 블록에서 에러 로깅 없음', suggestion: 'console.error 또는 logger.error 추가', file: 'src/api/payments.ts', line: 156 },
+    { mainCat: 'OPERATIONS', subCat: 'RETRY', ruleId: 'OPS002', severity: 'HIGH', msg: '외부 API 호출에 재시도 로직 없음', suggestion: 'exponential backoff 재시도 구현', file: 'src/integrations/stripe.ts', line: 45 },
+    { mainCat: 'TEST', subCat: 'COVERAGE', ruleId: 'TST001', severity: 'MEDIUM', msg: '핵심 비즈니스 로직에 테스트 없음', suggestion: 'jest 테스트 케이스 추가 필요', file: 'src/services/pricing.ts', line: 1 },
+    { mainCat: 'TEST', subCat: 'ASSERTION', ruleId: 'TST002', severity: 'LOW', msg: '테스트에 expect 구문이 없음 (빈 테스트)', suggestion: '실제 검증 로직 추가', file: 'src/__tests__/auth.test.ts', line: 23 },
+    { mainCat: 'STANDARDS', subCat: 'FORMAT', ruleId: 'STD001', severity: 'INFO', msg: '파일 끝에 개행 문자 없음', suggestion: 'Prettier 또는 ESLint 규칙 적용', file: 'src/types/index.ts', line: 45 }
+  ],
+  java: [
+    { mainCat: 'SECURITY', subCat: 'INJECTION', ruleId: 'SEC001', severity: 'CRITICAL', msg: 'SQL Injection: Statement 대신 PreparedStatement 사용 필요', suggestion: 'PreparedStatement로 변경하세요', file: 'src/main/java/UserRepository.java', line: 78 },
+    { mainCat: 'SECURITY', subCat: 'SECRETS', ruleId: 'SEC003', severity: 'CRITICAL', msg: '민감 정보(카드번호)가 로그에 출력됨', suggestion: '마스킹 처리 적용 (xxxx-xxxx-xxxx-1234)', file: 'src/main/java/PaymentService.java', line: 156 },
+    { mainCat: 'SECURITY', subCat: 'CRYPTO', ruleId: 'SEC004', severity: 'HIGH', msg: 'DES 암호화 알고리즘 사용 (취약)', suggestion: 'AES-256으로 변경', file: 'src/main/java/CryptoUtils.java', line: 34 },
+    { mainCat: 'QUALITY', subCat: 'COMPLEXITY', ruleId: 'QUA001', severity: 'HIGH', msg: '메서드 복잡도 초과 (32)', suggestion: '메서드 분리 및 Strategy 패턴 고려', file: 'src/main/java/OrderProcessor.java', line: 234 },
+    { mainCat: 'QUALITY', subCat: 'EXCEPTION', ruleId: 'QUA004', severity: 'MEDIUM', msg: '빈 catch 블록 - 예외 무시됨', suggestion: '로깅 또는 적절한 예외 처리 추가', file: 'src/main/java/DataLoader.java', line: 89 },
+    { mainCat: 'STRUCTURE', subCat: 'LAYER', ruleId: 'STR002', severity: 'MEDIUM', msg: 'Controller에서 직접 Repository 호출', suggestion: 'Service 레이어 도입', file: 'src/main/java/UserController.java', line: 45 },
+    { mainCat: 'OPERATIONS', subCat: 'RETRY', ruleId: 'OPS002', severity: 'HIGH', msg: 'HTTP 클라이언트에 타임아웃 미설정', suggestion: 'connectionTimeout, readTimeout 설정', file: 'src/main/java/ApiClient.java', line: 23 },
+    { mainCat: 'TEST', subCat: 'COVERAGE', ruleId: 'TST001', severity: 'HIGH', msg: '결제 모듈 테스트 커버리지 15%', suggestion: '최소 80% 커버리지 달성 필요', file: 'src/main/java/PaymentGateway.java', line: 1 }
+  ],
+  python: [
+    { mainCat: 'SECURITY', subCat: 'INJECTION', ruleId: 'SEC001', severity: 'CRITICAL', msg: 'eval() 사용은 보안에 위험', suggestion: 'ast.literal_eval() 또는 JSON 사용', file: 'src/utils/config.py', line: 34 },
+    { mainCat: 'SECURITY', subCat: 'CRYPTO', ruleId: 'SEC005', severity: 'MEDIUM', msg: 'pickle 역직렬화는 RCE 취약점 유발 가능', suggestion: 'JSON 또는 msgpack 사용', file: 'src/cache/storage.py', line: 67 },
+    { mainCat: 'QUALITY', subCat: 'TYPING', ruleId: 'QUA005', severity: 'MEDIUM', msg: 'Type hint 누락으로 IDE 지원 제한', suggestion: 'typing 모듈로 타입 힌트 추가', file: 'src/transform.py', line: 45 },
+    { mainCat: 'QUALITY', subCat: 'RESOURCE', ruleId: 'QUA006', severity: 'HIGH', msg: '파일 핸들 close() 누락 (리소스 누수)', suggestion: 'with 문 또는 contextlib 사용', file: 'src/loader.py', line: 123 },
+    { mainCat: 'OPERATIONS', subCat: 'LOGGING', ruleId: 'OPS001', severity: 'LOW', msg: 'print() 대신 logging 모듈 권장', suggestion: 'logging.info() 등으로 변경', file: 'src/main.py', line: 56 }
+  ]
+};
 
-// SQL to create tables
-const createTablesSql = `
--- Projects
-CREATE TABLE IF NOT EXISTS Project (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  path TEXT UNIQUE NOT NULL,
-  description TEXT,
-  type TEXT,
-  tier TEXT DEFAULT 'STANDARD',
-  createdAt TEXT DEFAULT (datetime('now')),
-  updatedAt TEXT DEFAULT (datetime('now'))
-);
-
--- Analysis Executions
-CREATE TABLE IF NOT EXISTS AnalysisExecute (
-  id TEXT PRIMARY KEY,
-  projectId TEXT NOT NULL,
-  status TEXT NOT NULL,
-  score REAL,
-  report TEXT,
-  startedAt TEXT DEFAULT (datetime('now')),
-  completedAt TEXT,
-  inputHash TEXT,
-  snapshotPath TEXT,
-  environment TEXT,
-  FOREIGN KEY (projectId) REFERENCES Project(id) ON DELETE CASCADE
-);
-
--- Analysis Results
-CREATE TABLE IF NOT EXISTS AnalysisResult (
-  id TEXT PRIMARY KEY,
-  executeId TEXT NOT NULL,
-  category TEXT NOT NULL,
-  severity TEXT NOT NULL,
-  filePath TEXT,
-  lineNumber INTEGER,
-  message TEXT NOT NULL,
-  suggestion TEXT,
-  confidenceScore REAL DEFAULT 1.0,
-  reasoning TEXT,
-  createdAt TEXT DEFAULT (datetime('now')),
-  reviewStatus TEXT DEFAULT 'OPEN',
-  reviewComment TEXT,
-  humanCorrection TEXT,
-  isFlagged INTEGER DEFAULT 0,
-  FOREIGN KEY (executeId) REFERENCES AnalysisExecute(id) ON DELETE CASCADE
-);
-
--- Agent Execution
-CREATE TABLE IF NOT EXISTS AgentExecution (
-  id TEXT PRIMARY KEY,
-  executeId TEXT NOT NULL,
-  agentName TEXT NOT NULL,
-  status TEXT NOT NULL,
-  durationMs INTEGER,
-  tokensUsed INTEGER,
-  createdAt TEXT DEFAULT (datetime('now')),
-  completedAt TEXT,
-  FOREIGN KEY (executeId) REFERENCES AnalysisExecute(id) ON DELETE CASCADE
-);
-
--- Project Stats
-CREATE TABLE IF NOT EXISTS ProjectStats (
-  id TEXT PRIMARY KEY,
-  projectId TEXT NOT NULL,
-  timestamp TEXT DEFAULT (datetime('now')),
-  codeQualityScore REAL,
-  securityScore REAL,
-  maintainabilityScore REAL,
-  opsRiskScore REAL,
-  FOREIGN KEY (projectId) REFERENCES Project(id) ON DELETE CASCADE
-);
-
--- Approval Workflow
-CREATE TABLE IF NOT EXISTS ApprovalWorkflow (
-  id TEXT PRIMARY KEY,
-  executeId TEXT NOT NULL,
-  stepName TEXT NOT NULL,
-  status TEXT NOT NULL,
-  approverId TEXT,
-  comment TEXT,
-  updatedAt TEXT DEFAULT (datetime('now')),
-  FOREIGN KEY (executeId) REFERENCES AnalysisExecute(id) ON DELETE CASCADE
-);
-
--- Audit Log
-CREATE TABLE IF NOT EXISTS AuditLog (
-  id TEXT PRIMARY KEY,
-  action TEXT NOT NULL,
-  actorId TEXT,
-  targetType TEXT NOT NULL,
-  targetId TEXT NOT NULL,
-  details TEXT,
-  timestamp TEXT DEFAULT (datetime('now')),
-  ipAddress TEXT
-);
-
--- AI Models
-CREATE TABLE IF NOT EXISTS AiModel (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  version TEXT,
-  endpoint TEXT,
-  apiKey TEXT,
-  isDefault INTEGER DEFAULT 0,
-  isActive INTEGER DEFAULT 1,
-  latency REAL DEFAULT 0,
-  accuracy REAL DEFAULT 0,
-  costPerToken REAL DEFAULT 0,
-  usageToday INTEGER DEFAULT 0,
-  usageTotal INTEGER DEFAULT 0,
-  contextWindow INTEGER,
-  maxTokens INTEGER,
-  temperature REAL DEFAULT 0.7,
-  createdAt TEXT DEFAULT (datetime('now')),
-  updatedAt TEXT DEFAULT (datetime('now'))
-);
-`;
+const pipelineStages = [
+  { stage: 'SOURCE_COLLECT', msg: '소스 파일 수집 완료', duration: 1200 },
+  { stage: 'LANGUAGE_DETECT', msg: '15개 파일 언어 감지 완료', duration: 850 },
+  { stage: 'AST_PARSE', msg: 'AST 파싱 완료 (12/15 성공)', duration: 3500 },
+  { stage: 'STATIC_ANALYZE', msg: '정적 분석 완료 (복잡도, 의존성)', duration: 2800 },
+  { stage: 'RULE_PARSE', msg: '룰 기반 분석 완료 (4개 파서)', duration: 1500 },
+  { stage: 'CATEGORIZE', msg: '결과 분류 완료 (6개 카테고리)', duration: 400 },
+  { stage: 'NORMALIZE', msg: '정규화 완료 (28개 결과)', duration: 600 },
+  { stage: 'AI_ENHANCE', msg: 'AI 보강 완료 (선택적)', duration: 0 }
+];
 
 async function main() {
-  console.log('🌱 Seeding database...');
-
-  // Create tables
-  for (const sql of createTablesSql.split(';').filter(s => s.trim())) {
-    await libsql.execute(sql);
-  }
-  console.log('✓ Created tables');
-
-  // Clear existing data
-  await libsql.execute('DELETE FROM AuditLog');
-  await libsql.execute('DELETE FROM ApprovalWorkflow');
-  await libsql.execute('DELETE FROM ProjectStats');
-  await libsql.execute('DELETE FROM AnalysisResult');
-  await libsql.execute('DELETE FROM AgentExecution');
-  await libsql.execute('DELETE FROM AnalysisExecute');
-  await libsql.execute('DELETE FROM Project');
-  console.log('✓ Cleared existing data');
+  console.log('🌱 Seeding database with Prisma Client...');
 
   // Create projects
   const projects = [
-    { id: randomUUID(), name: 'JacodeLens Core', path: '/projects/jacodelens-core', description: '멀티 에이전트 기반 코드 분석 플랫폼 핵심 백엔드', type: 'NEXTJS', tier: 'ENTERPRISE' },
-    { id: randomUUID(), name: 'Payment Gateway', path: '/projects/payment-gateway', description: '결제 처리 마이크로서비스', type: 'JAVA', tier: 'ENTERPRISE' },
-    { id: randomUUID(), name: 'ML Pipeline', path: '/projects/ml-pipeline', description: '기계학습 데이터 파이프라인', type: 'PYTHON', tier: 'STANDARD' },
-    { id: randomUUID(), name: 'Mobile App API', path: '/projects/mobile-api', description: '모바일 앱 백엔드 REST API', type: 'NEXTJS', tier: 'STANDARD' },
-    { id: randomUUID(), name: 'DevOps Automation', path: '/projects/devops-automation', description: 'CI/CD 파이프라인 및 인프라 자동화', type: 'PYTHON', tier: 'ENTERPRISE' },
+    await prisma.project.upsert({
+      where: { path: 'd:/project/jacodelens' },
+      update: {},
+      create: { name: 'JacodeLens Core', path: 'd:/project/jacodelens', description: '멀티 에이전트 기반 코드 분석 플랫폼', type: 'NEXTJS', tier: 'ENTERPRISE' }
+    }),
+    await prisma.project.upsert({
+      where: { path: '/projects/ecommerce-java' },
+      update: {},
+      create: { name: 'E-Commerce Platform', path: '/projects/ecommerce-java', description: 'Spring Boot 전자상거래 플랫폼', type: 'JAVA', tier: 'ENTERPRISE' }
+    }),
+    await prisma.project.upsert({
+      where: { path: '/projects/ml-pipeline' },
+      update: {},
+      create: { name: 'ML Data Pipeline', path: '/projects/ml-pipeline', description: 'Python 기계학습 데이터 파이프라인', type: 'PYTHON', tier: 'STANDARD' }
+    }),
+    await prisma.project.upsert({
+      where: { path: '/projects/mobile-api' },
+      update: {},
+      create: { name: 'Mobile API Gateway', path: '/projects/mobile-api', description: 'React Native 앱 백엔드 API', type: 'NEXTJS', tier: 'STANDARD' }
+    }),
+    await prisma.project.upsert({
+      where: { path: '/projects/devops' },
+      update: {},
+      create: { name: 'DevOps Automation', path: '/projects/devops', description: 'CI/CD 파이프라인 자동화 도구', type: 'PYTHON', tier: 'ENTERPRISE' }
+    }),
   ];
-
-  for (const p of projects) {
-    await libsql.execute({
-      sql: 'INSERT INTO Project (id, name, path, description, type, tier) VALUES (?, ?, ?, ?, ?, ?)',
-      args: [p.id, p.name, p.path, p.description, p.type, p.tier],
-    });
-  }
   console.log(`✓ Created ${projects.length} projects`);
 
-  // Analysis data
-  const analysisData = [
-    {
-      projectId: projects[0].id,
-      score: 78.5,
-      results: [
-        { category: 'SECURITY', severity: 'CRITICAL', message: 'SQL Injection 취약점이 발견되었습니다', filePath: 'src/api/users.ts', lineNumber: 45, suggestion: 'parameterized query를 사용하세요' },
-        { category: 'SECURITY', severity: 'HIGH', message: 'XSS 취약점이 발견되었습니다', filePath: 'src/components/Comment.tsx', lineNumber: 23, suggestion: 'DOMPurify로 sanitize 하세요' },
-        { category: 'QUALITY', severity: 'MEDIUM', message: '함수 복잡도가 높습니다 (Cyclomatic: 15)', filePath: 'src/utils/parser.ts', lineNumber: 89, suggestion: '함수를 분리하여 복잡도를 낮추세요' },
-        { category: 'ARCHITECTURE', severity: 'HIGH', message: '순환 의존성이 발견되었습니다', filePath: 'src/modules/auth', lineNumber: null, suggestion: '의존성 방향을 재설계하세요' },
-        { category: 'PERFORMANCE', severity: 'HIGH', message: 'N+1 쿼리 문제가 발견되었습니다', filePath: 'src/api/orders.ts', lineNumber: 67, suggestion: 'eager loading을 사용하세요' },
-        { category: 'OPERATIONS', severity: 'MEDIUM', message: '로깅이 부족합니다', filePath: 'src/services/payment.ts', lineNumber: null, suggestion: '로깅 커버리지를 높이세요' },
-      ],
-    },
-    {
-      projectId: projects[1].id,
-      score: 65.2,
-      results: [
-        { category: 'SECURITY', severity: 'CRITICAL', message: '민감 정보가 로그에 노출됩니다', filePath: 'PaymentService.java', lineNumber: 156, suggestion: '민감 정보 마스킹 적용' },
-        { category: 'SECURITY', severity: 'CRITICAL', message: '암호화되지 않은 데이터 전송', filePath: 'ApiClient.java', lineNumber: 89, suggestion: 'TLS 적용 필수' },
-        { category: 'SECURITY', severity: 'HIGH', message: '취약한 해시 알고리즘 사용 (MD5)', filePath: 'CryptoUtils.java', lineNumber: 34, suggestion: 'SHA-256 이상 사용' },
-        { category: 'QUALITY', severity: 'HIGH', message: '중복 코드 블록 발견', filePath: 'OrderProcessor.java', lineNumber: null, suggestion: '공통 메서드로 추출하세요' },
-        { category: 'OPERATIONS', severity: 'HIGH', message: '재시도 로직 없음', filePath: 'PaymentGateway.java', lineNumber: null, suggestion: 'Circuit breaker 패턴 적용' },
-      ],
-    },
-    {
-      projectId: projects[2].id,
-      score: 82.1,
-      results: [
-        { category: 'QUALITY', severity: 'MEDIUM', message: '타입 힌트 누락', filePath: 'transform.py', lineNumber: 45, suggestion: '타입 힌트를 추가하세요' },
-        { category: 'SECURITY', severity: 'MEDIUM', message: 'Pickle 역직렬화 사용', filePath: 'cache.py', lineNumber: 67, suggestion: 'JSON 또는 안전한 직렬화 사용' },
-        { category: 'PERFORMANCE', severity: 'HIGH', message: '메모리 누수 가능성', filePath: 'loader.py', lineNumber: 123, suggestion: 'context manager 사용' },
-      ],
-    },
-    {
-      projectId: projects[3].id,
-      score: 91.3,
-      results: [
-        { category: 'QUALITY', severity: 'LOW', message: '미사용 import', filePath: 'users.ts', lineNumber: 5, suggestion: '정리하세요' },
-        { category: 'PERFORMANCE', severity: 'LOW', message: '캐싱 적용 권장', filePath: 'products.ts', lineNumber: null, suggestion: 'Redis 캐싱 적용' },
-      ],
-    },
-    {
-      projectId: projects[4].id,
-      score: 85.7,
-      results: [
-        { category: 'SECURITY', severity: 'MEDIUM', message: 'API 키가 코드에 하드코딩됨', filePath: 'config.py', lineNumber: 23, suggestion: '환경변수 사용' },
-        { category: 'OPERATIONS', severity: 'LOW', message: '헬스체크 엔드포인트 없음', filePath: null, lineNumber: null, suggestion: '/health 엔드포인트 추가' },
-      ],
-    },
+  // Analysis configs
+  const analysisConfigs = [
+    { project: projects[0], results: pipelineResults.typescript, score: 72.5 },
+    { project: projects[1], results: pipelineResults.java, score: 65.8 },
+    { project: projects[2], results: pipelineResults.python, score: 85.3 },
+    { project: projects[3], results: pipelineResults.typescript.slice(0, 6), score: 88.5 },
+    { project: projects[4], results: pipelineResults.python.slice(0, 3), score: 91.2 },
   ];
 
-  let totalResults = 0;
-  const agentNames = ['StaticAnalysisAgent', 'ArchitectureAgent', 'SecurityAgent', 'OpsRiskAgent', 'ReviewerAgent', 'ImprovementAgent'];
+  let totalNormalizedResults = 0;
+  const agentNames = ['StructureAnalysisAgent', 'QualityAnalysisAgent', 'SecurityAgent', 'TestAnalysisAgent', 'StyleAnalysisAgent', 'OpsRiskAgent'];
 
-  for (const data of analysisData) {
-    const execId = randomUUID();
-    const now = new Date().toISOString();
-    const startedAt = new Date(Date.now() - 120000).toISOString();
+  for (const config of analysisConfigs) {
+    const startTime = new Date(Date.now() - 180000);
+    const endTime = new Date(Date.now() - 60000);
 
-    await libsql.execute({
-      sql: 'INSERT INTO AnalysisExecute (id, projectId, status, score, startedAt, completedAt, environment) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      args: [execId, data.projectId, 'COMPLETED', data.score, startedAt, now, 'DEV'],
+    // Create AnalysisExecute
+    const execution = await prisma.analysisExecute.create({
+      data: {
+        projectId: config.project.id,
+        status: 'COMPLETED',
+        score: config.score,
+        startedAt: startTime,
+        completedAt: endTime,
+        environment: 'PRODUCTION'
+      }
     });
 
-    for (const r of data.results) {
-      await libsql.execute({
-        sql: 'INSERT INTO AnalysisResult (id, executeId, category, severity, filePath, lineNumber, message, suggestion, confidenceScore, reviewStatus) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        args: [randomUUID(), execId, r.category, r.severity, r.filePath, r.lineNumber, r.message, r.suggestion, 0.75 + Math.random() * 0.25, r.severity === 'CRITICAL' ? 'IN_PROGRESS' : 'OPEN'],
+    // Create PipelineStageExecution
+    let stageStartTime = new Date(startTime);
+    for (const stage of pipelineStages) {
+      const stageEndTime = new Date(stageStartTime.getTime() + stage.duration);
+      await prisma.pipelineStageExecution.create({
+        data: {
+          executeId: execution.id,
+          stage: stage.stage,
+          status: 'completed',
+          progress: 100,
+          message: stage.msg,
+          startedAt: stageStartTime,
+          completedAt: stageEndTime
+        }
       });
-      totalResults++;
+      stageStartTime = stageEndTime;
     }
 
+    // Create NormalizedAnalysisResult
+    const lang = config.project.type === 'JAVA' ? 'java' : config.project.type === 'PYTHON' ? 'python' : 'typescript';
+    for (const r of config.results) {
+      await prisma.normalizedAnalysisResult.create({
+        data: {
+          executeId: execution.id,
+          filePath: r.file,
+          lineStart: r.line,
+          lineEnd: r.line + 5,
+          language: lang,
+          mainCategory: r.mainCat,
+          subCategory: r.subCat,
+          ruleId: r.ruleId,
+          severity: r.severity,
+          message: r.msg,
+          suggestion: r.suggestion,
+          deterministic: true
+        }
+      });
+      totalNormalizedResults++;
+    }
+
+    // Create AgentExecution
     for (const agentName of agentNames) {
-      await libsql.execute({
-        sql: 'INSERT INTO AgentExecution (id, executeId, agentName, status, durationMs, tokensUsed, completedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        args: [randomUUID(), execId, agentName, 'COMPLETED', 5000 + Math.floor(Math.random() * 25000), 1000 + Math.floor(Math.random() * 5000), now],
-      });
-    }
-
-    // Add approval workflow for enterprise projects
-    const project = projects.find(p => p.id === data.projectId);
-    if (project?.tier === 'ENTERPRISE') {
-      await libsql.execute({
-        sql: 'INSERT INTO ApprovalWorkflow (id, executeId, stepName, status) VALUES (?, ?, ?, ?)',
-        args: [randomUUID(), execId, 'Security Review', data.results.some(r => r.severity === 'CRITICAL') ? 'PENDING' : 'APPROVED'],
+      await prisma.agentExecution.create({
+        data: {
+          executeId: execution.id,
+          agentName,
+          status: 'COMPLETED',
+          durationMs: 8000 + Math.floor(Math.random() * 20000),
+          tokensUsed: 2000 + Math.floor(Math.random() * 8000),
+          completedAt: endTime
+        }
       });
     }
   }
-  console.log(`✓ Created ${analysisData.length} analyses with ${totalResults} results`);
+  console.log(`✓ Created ${analysisConfigs.length} analyses with ${totalNormalizedResults} normalized results`);
 
-  // Project Stats (historical)
+  // AI Models
+  const aiModelData = [
+    { name: 'qwen3:8b', provider: 'Ollama', version: 'latest', endpoint: 'http://localhost:11434', isDefault: true, isActive: true, latency: 0.35, accuracy: 82, costPerToken: 0, contextWindow: 32768, maxTokens: 8192, temperature: 0.7 },
+    { name: 'llama3.1:8b', provider: 'Ollama', version: 'latest', endpoint: 'http://localhost:11434', isDefault: false, isActive: true, latency: 0.4, accuracy: 80, costPerToken: 0, contextWindow: 131072, maxTokens: 8192, temperature: 0.7 },
+    { name: 'gpt-4o', provider: 'OpenAI', version: '2024-08', endpoint: 'https://api.openai.com/v1', isDefault: false, isActive: false, latency: 1.5, accuracy: 95, costPerToken: 0.015, contextWindow: 128000, maxTokens: 16384, temperature: 0.7 },
+    { name: 'gpt-4o-mini', provider: 'OpenAI', version: '2024-07', endpoint: 'https://api.openai.com/v1', isDefault: false, isActive: false, latency: 0.6, accuracy: 88, costPerToken: 0.0003, contextWindow: 128000, maxTokens: 16384, temperature: 0.7 },
+    { name: 'claude-3.5-sonnet', provider: 'Anthropic', version: '20241022', endpoint: 'https://api.anthropic.com/v1', isDefault: false, isActive: false, latency: 1.2, accuracy: 93, costPerToken: 0.012, contextWindow: 200000, maxTokens: 8192, temperature: 0.7 },
+  ];
+  
+  for (const model of aiModelData) {
+    await prisma.aiModel.create({ data: model }).catch(() => {});  // Ignore duplicates
+  }
+  console.log(`✓ Created AI models`);
+
+  // AI Prompts
+  const prompts = await Promise.all([
+    prisma.aiPrompt.upsert({ where: { key: 'agent.structure' }, update: {}, create: { key: 'agent.structure', name: '구조 분석', category: 'AGENT', systemPrompt: '코드 구조를 분석하고 개선점을 제안하세요.', userPromptTemplate: '다음 코드를 분석하세요:\n{{code}}' } }),
+    prisma.aiPrompt.upsert({ where: { key: 'agent.security' }, update: {}, create: { key: 'agent.security', name: '보안 분석', category: 'AGENT', systemPrompt: 'OWASP Top 10 기준으로 보안 취약점을 찾으세요.', userPromptTemplate: '다음 코드의 보안 취약점을 분석하세요:\n{{code}}' } }),
+    prisma.aiPrompt.upsert({ where: { key: 'agent.quality' }, update: {}, create: { key: 'agent.quality', name: '품질 분석', category: 'AGENT', systemPrompt: '코드 냄새, 복잡도, 중복을 찾아 개선점을 제안하세요.', userPromptTemplate: '다음 코드의 품질을 분석하세요:\n{{code}}' } }),
+    prisma.aiPrompt.upsert({ where: { key: 'agent.test' }, update: {}, create: { key: 'agent.test', name: '테스트 분석', category: 'AGENT', systemPrompt: '테스트 커버리지와 품질을 분석하세요.', userPromptTemplate: '다음 테스트 코드를 분석하세요:\n{{code}}' } }),
+  ]);
+  console.log(`✓ Created ${prompts.length} AI prompts`);
+
+  // Agent Configs
+  const agentConfigs = [
+    { name: 'StructureAnalysisAgent', displayName: '구조 분석', description: '코드 구조와 아키텍처를 분석합니다', category: 'ANALYSIS', priority: 1, timeout: 120 },
+    { name: 'SecurityAgent', displayName: '보안 분석', description: 'OWASP Top 10 보안 취약점을 탐지합니다', category: 'SECURITY', priority: 2, timeout: 120 },
+    { name: 'QualityAnalysisAgent', displayName: '품질 분석', description: '코드 품질과 복잡도를 분석합니다', category: 'QUALITY', priority: 3, timeout: 90 },
+    { name: 'TestAnalysisAgent', displayName: '테스트 분석', description: '테스트 커버리지와 품질을 분석합니다', category: 'QUALITY', priority: 4, timeout: 60 },
+    { name: 'StyleAnalysisAgent', displayName: '스타일 분석', description: '코딩 스타일 컨벤션을 검사합니다', category: 'QUALITY', priority: 5, timeout: 60 },
+    { name: 'OpsRiskAgent', displayName: '운영 리스크', description: '운영 관련 리스크를 분석합니다', category: 'OPERATIONS', priority: 6, timeout: 60 },
+  ];
+
+  for (const agent of agentConfigs) {
+    await prisma.agentConfig.upsert({
+      where: { name: agent.name },
+      update: {},
+      create: { ...agent, isEnabled: true, totalRuns: Math.floor(Math.random() * 100), successRuns: Math.floor(Math.random() * 95), avgDuration: 15000 + Math.random() * 30000 }
+    });
+  }
+  console.log(`✓ Created ${agentConfigs.length} agent configs`);
+
+  // Project Stats (30 days)
   for (const project of projects) {
-    for (let i = 7; i >= 0; i--) {
+    for (let i = 30; i >= 0; i--) {
       const date = new Date();
       date.setDate(date.getDate() - i);
-      await libsql.execute({
-        sql: 'INSERT INTO ProjectStats (id, projectId, timestamp, codeQualityScore, securityScore, maintainabilityScore, opsRiskScore) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        args: [randomUUID(), project.id, date.toISOString(), 70 + Math.random() * 25, 60 + Math.random() * 35, 65 + Math.random() * 30, 50 + Math.random() * 40],
+      const baseScore = 65 + (30 - i) * 0.3;
+      await prisma.projectStats.create({
+        data: {
+          projectId: project.id,
+          timestamp: date,
+          codeQualityScore: baseScore + Math.random() * 20,
+          securityScore: baseScore - 5 + Math.random() * 25,
+          maintainabilityScore: baseScore + Math.random() * 15,
+          opsRiskScore: baseScore - 10 + Math.random() * 30
+        }
       });
     }
   }
-  console.log('✓ Created historical project stats');
+  console.log('✓ Created 30-day historical stats');
 
-  // Audit logs
-  const auditActions = ['ANALYSIS_START', 'ANALYSIS_COMPLETE', 'RESULT_REVIEWED', 'APPROVED'];
-  for (let i = 0; i < 15; i++) {
-    const date = new Date();
-    date.setHours(date.getHours() - i);
-    await libsql.execute({
-      sql: 'INSERT INTO AuditLog (id, action, actorId, targetType, targetId, details, timestamp, ipAddress) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      args: [randomUUID(), auditActions[Math.floor(Math.random() * auditActions.length)], ['admin', 'dev1', 'ops1', 'SYSTEM'][Math.floor(Math.random() * 4)], 'ANALYSIS', projects[Math.floor(Math.random() * projects.length)].id, JSON.stringify({ source: 'dashboard' }), date.toISOString(), '192.168.1.' + Math.floor(Math.random() * 255)],
-    });
-  }
-  console.log('✓ Created audit logs');
-
-  // AI Models - Clear and seed
-  await libsql.execute('DELETE FROM AiModel');
-  
-  const aiModels = [
-    { 
-      id: randomUUID(), 
-      name: 'qwen3:8b', 
-      provider: 'Ollama', 
-      version: 'latest',
-      endpoint: 'http://localhost:11434',
-      apiKey: null,
-      isDefault: 1, 
-      isActive: 1, 
-      latency: 0.3, 
-      accuracy: 85, 
-      costPerToken: 0,  // Free local model
-      usageToday: 0,
-      usageTotal: 0,
-      contextWindow: 32768,
-      maxTokens: 8192,
-      temperature: 0.7
-    },
-    { 
-      id: randomUUID(), 
-      name: 'gpt-4o', 
-      provider: 'OpenAI', 
-      version: '2024-05',
-      endpoint: 'https://api.openai.com/v1',
-      apiKey: null, // Set in .env
-      isDefault: 0, 
-      isActive: 0,  // Disabled by default 
-      latency: 1.2, 
-      accuracy: 95, 
-      costPerToken: 0.015,
-      usageToday: 0,
-      usageTotal: 0,
-      contextWindow: 128000,
-      maxTokens: 4096,
-      temperature: 0.7
-    },
-    { 
-      id: randomUUID(), 
-      name: 'gpt-4o-mini', 
-      provider: 'OpenAI', 
-      version: '2024-07',
-      endpoint: 'https://api.openai.com/v1',
-      apiKey: null,
-      isDefault: 0, 
-      isActive: 0, 
-      latency: 0.5, 
-      accuracy: 88, 
-      costPerToken: 0.0003,
-      usageToday: 0,
-      usageTotal: 0,
-      contextWindow: 128000,
-      maxTokens: 16384,
-      temperature: 0.7
-    }
-  ];
-
-  for (const model of aiModels) {
-    await libsql.execute({
-      sql: `INSERT INTO AiModel (id, name, provider, version, endpoint, apiKey, isDefault, isActive, latency, accuracy, costPerToken, usageToday, usageTotal, contextWindow, maxTokens, temperature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [model.id, model.name, model.provider, model.version, model.endpoint, model.apiKey, model.isDefault, model.isActive, model.latency, model.accuracy, model.costPerToken, model.usageToday, model.usageTotal, model.contextWindow, model.maxTokens, model.temperature]
-    });
-  }
-  console.log(`✓ Created ${aiModels.length} AI models (Ollama qwen3:8b as default)`);
-
-  console.log('\n✅ Database seeding completed!');
-  console.log(`   - ${projects.length} projects`);
-  console.log(`   - ${analysisData.length} analyses`);
-  console.log(`   - ${totalResults} analysis results`);
-  console.log(`   - ${aiModels.length} AI models`);
+  console.log('\n✅ Seeding completed successfully!');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log(`   📁 ${projects.length} projects`);
+  console.log(`   🔬 ${analysisConfigs.length} pipeline analyses`);
+  console.log(`   📊 ${totalNormalizedResults} normalized results`);
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 }
 
 main()
   .catch((e) => {
     console.error('❌ Seeding failed:', e);
     process.exit(1);
+  })
+  .finally(() => {
+    prisma.$disconnect();
   });
-
