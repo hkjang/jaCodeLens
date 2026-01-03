@@ -198,6 +198,9 @@ export default function SnapshotsPage() {
         <div>
           <h2 className="text-3xl font-bold text-gray-900 dark:text-white">분석 스냅샷</h2>
           <p className="text-gray-500">재현 가능한 분석 결과를 관리하고 비교합니다</p>
+          <p className="text-xs text-blue-500 mt-1">
+            💡 프로젝트 상세 페이지에서 [이력] 버튼을 클릭하면 프로젝트별 분석 이력을 확인할 수 있습니다
+          </p>
         </div>
         <div className="flex items-center gap-3">
           {selectedSnapshots.length === 2 && (

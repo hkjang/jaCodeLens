@@ -23,7 +23,9 @@ import {
   ChevronDown,
   Star,
   Target,
-  ListTodo
+  ListTodo,
+  History,
+  TrendingUp
 } from 'lucide-react';
 import { useRole, UserRole, roleConfigs } from '@/lib/contexts/RoleContext';
 import QuickActions from '@/components/QuickActions';
@@ -59,11 +61,14 @@ const allMenuItems = {
   'self-backlog': { href: '/dashboard/self-analysis/backlog', icon: <ListTodo className="w-4 h-4" />, label: '백로그' },
   'self-policy': { href: '/dashboard/self-analysis/policy', icon: <Shield className="w-4 h-4" />, label: '분석 정책' },
   'code-elements': { href: '/dashboard/code-elements', icon: <Code2 className="w-4 h-4" />, label: '코드 요소' },
+  'analysis-history': { href: '/dashboard/snapshots', icon: <History className="w-4 h-4" />, label: '분석 이력' },
+  'analysis-trends': { href: '/dashboard/reports', icon: <TrendingUp className="w-4 h-4" />, label: '트렌드' },
+  'tasks': { href: '/dashboard/tasks', icon: <ListTodo className="w-4 h-4" />, label: '개선 태스크' },
 };
 
 const menuSections: Record<string, { title: string; items: string[] }> = {
   projects: { title: '프로젝트', items: ['projects', 'new-project'] },
-  pipeline: { title: '파이프라인', items: ['dashboard', 'execution', 'results'] },
+  pipeline: { title: '파이프라인', items: ['dashboard', 'execution', 'results', 'tasks', 'analysis-history', 'analysis-trends'] },
   analysis: { title: '분석 결과', items: ['code-issues', 'improvements', 'architecture', 'dependencies', 'risk-heatmap'] },
   selfAnalysis: { title: 'Self Analysis', items: ['self-analysis', 'self-baseline', 'self-backlog', 'self-policy', 'code-elements'] },
   operations: { title: '운영', items: ['operations', 'agents', 'queue', 'resources', 'logs', 'approvals', 'notifications', 'history'] },
