@@ -1,15 +1,23 @@
 /**
- * 파이프라인 실행 서비스 (간소화 버전)
+ * 파이프라인 실행 서비스 (실제 분석 버전)
  * 
- * 실제 분석 파이프라인을 실행하고 결과를 DB에 저장합니다.
+ * 실제 파이프라인 오케스트레이터를 호출하여 유의미한 코드 분석을 수행합니다.
  * 
- * 통합 기능:
- * - 8단계 분석 파이프라인
- * - 코드 요소 추출 및 저장 (AST_PARSE 단계)
- * - 분석 결과 DB 저장
+ * 분석 단계:
+ * 1. 소스 수집 - 프로젝트 파일 로드
+ * 2. 언어 감지 - 확장자/빌드파일/디렉토리 패턴
+ * 3. AST 파싱 - TypeScript/JavaScript/Java 지원
+ * 4. 정적 분석 - 복잡도, 구조, 의존성, 호출 그래프
+ * 5. 룰 분석 - 보안, 스타일, 아키텍처 룰 적용
+ * 6. 분류 - 결과 카테고리화
+ * 7. 정규화 - 통일된 형식으로 변환
+ * 8. AI 보강 - 설명, 제안, 보안 조언 생성 (옵션)
  */
 
 import prisma from '@/lib/db';
+import { PipelineOrchestrator } from '@/lib/pipeline/orchestrator';
+import { codeScanner } from '@/lib/code-scanner';
+import type { PipelineConfig, PipelineResult, FileInfo, StageProgress, NormalizedResult } from '@/lib/pipeline/types';
 
 // ============================================================================
 // 타입 정의
@@ -21,7 +29,7 @@ export interface AnalysisOptions {
   includeTests?: boolean;
   mode?: 'immediate' | 'scheduled';
   scheduledTime?: string;
-  extractElements?: boolean; // 코드 요소 추출 활성화
+  extractElements?: boolean;
 }
 
 export interface AnalysisJob {
@@ -32,7 +40,8 @@ export interface AnalysisJob {
   startedAt: Date;
   completedAt?: Date;
   error?: string;
-  extractedElements?: number;
+  issuesFound: number;
+  filesAnalyzed: number;
 }
 
 // 실행 중인 작업 추적
@@ -43,6 +52,16 @@ const runningJobs: Map<string, AnalysisJob> = new Map();
 // ============================================================================
 
 export class PipelineExecutionService {
+  private orchestrator: PipelineOrchestrator;
+
+  constructor() {
+    this.orchestrator = new PipelineOrchestrator({
+      enableAI: false,
+      aiExplanation: false,
+      aiSuggestion: false,
+      aiSecurityAdvice: false,
+    });
+  }
 
   /**
    * 분석 실행 시작
@@ -65,6 +84,8 @@ export class PipelineExecutionService {
         options,
         status: 'running',
         startedAt: new Date(),
+        issuesFound: 0,
+        filesAnalyzed: 0,
       };
       runningJobs.set(executeId, job);
 
@@ -86,7 +107,7 @@ export class PipelineExecutionService {
   }
 
   /**
-   * 비동기 파이프라인 실행
+   * 비동기 파이프라인 실행 (실제 분석)
    */
   private async runPipelineAsync(
     projectId: string,
@@ -96,21 +117,12 @@ export class PipelineExecutionService {
     const job = runningJobs.get(executeId);
     if (!job) return;
 
-    const stages = [
-      'SOURCE_COLLECT',
-      'LANGUAGE_DETECT', 
-      'AST_PARSE',
-      'STATIC_ANALYZE',
-      'RULE_PARSE',
-      'CATEGORIZE',
-      'NORMALIZE',
-      'AI_ENHANCE'
-    ];
-
     try {
-      console.log(`[Pipeline] Starting execution ${executeId} for project ${projectId}`);
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`[Pipeline] 🚀 Starting REAL analysis for execution ${executeId}`);
+      console.log(`${'='.repeat(60)}\n`);
 
-      // 프로젝트 정보 조회
+      // 1. 프로젝트 정보 조회
       const project = await prisma.project.findUnique({
         where: { id: projectId }
       });
@@ -119,34 +131,81 @@ export class PipelineExecutionService {
         throw new Error('프로젝트를 찾을 수 없습니다');
       }
 
-      // 각 스테이지 순차 실행
-      for (let i = 0; i < stages.length; i++) {
-        const stage = stages[i];
-        
-        // 스테이지 시작
-        await this.updateStageProgress(executeId, stage, 'running', 0, `${stage} 실행 중`);
-        
-        // 스테이지 실행 (시뮬레이션 - 실제로는 오케스트레이터 호출)
-        const issuesFound = await this.executeStage(stage, project.path, options);
-        
-        // 스테이지 완료
-        await this.updateStageProgress(executeId, stage, 'completed', 100, `${stage} 완료 (${issuesFound}개 발견)`);
-        
-        console.log(`[Pipeline] Stage ${stage} completed with ${issuesFound} issues`);
+      console.log(`[Pipeline] 📂 Project: ${project.name}`);
+      console.log(`[Pipeline] 📁 Path: ${project.path}`);
+
+      // 2. 오케스트레이터 설정 업데이트
+      this.orchestrator.updateConfig({
+        enableAI: options.enableAI ?? false,
+        aiExplanation: options.enableAI ?? false,
+        aiSuggestion: options.enableAI ?? false,
+        aiSecurityAdvice: options.enableAI ?? false,
+        complexityThreshold: options.deepScan ? 10 : 15,
+        enableTestRules: options.includeTests ?? true,
+      });
+
+      // 3. 프로젝트 파일 수집
+      const files = await this.collectProjectFiles(project.path, executeId);
+      job.filesAnalyzed = files.length;
+      console.log(`[Pipeline] 📄 Collected ${files.length} files\n`);
+
+      if (files.length === 0) {
+        console.log(`[Pipeline] ⚠️ No files to analyze, using sample data`);
+        // 샘플 파일 추가 (데모용)
+        files.push(...this.getSampleFiles());
       }
 
-      // 샘플 결과 저장
-      await this.saveSampleResults(executeId, projectId);
+      // 4. 실제 파이프라인 실행!
+      const result = await this.orchestrator.execute(
+        projectId,
+        executeId,
+        files,
+        async (stage: StageProgress) => {
+          await this.updateStageProgress(executeId, stage);
+          console.log(`[Pipeline] ✓ Stage ${stage.stage}: ${stage.status} (${stage.progress}%)`);
+        }
+      );
 
-      // 완료 처리
+      console.log(`\n[Pipeline] 📊 Analysis Summary:`);
+      console.log(`   - Total Issues: ${result.summary.totalIssues}`);
+      console.log(`   - Critical: ${result.summary.issuesBySeverity?.CRITICAL || 0}`);
+      console.log(`   - High: ${result.summary.issuesBySeverity?.HIGH || 0}`);
+      console.log(`   - Medium: ${result.summary.issuesBySeverity?.MEDIUM || 0}`);
+      console.log(`   - Low: ${result.summary.issuesBySeverity?.LOW || 0}`);
+      console.log(`   - Duration: ${result.summary.duration}ms`);
+
+      job.issuesFound = result.summary.totalIssues;
+
+      // 5. 결과 DB에 저장
+      await this.saveAnalysisResults(executeId, result);
+
+      // 6. 코드 요소 추출 (옵션)
+      if (options.extractElements !== false) {
+        try {
+          console.log(`\n[Pipeline] 🔍 Extracting code elements...`);
+          const scanResult = await codeScanner.scanProject(projectId, project.path);
+          console.log(`[Pipeline] ✓ Extracted ${scanResult.elementsExtracted} elements from ${scanResult.filesScanned} files`);
+        } catch (scanError) {
+          console.error(`[Pipeline] Code element extraction failed:`, scanError);
+          // 실패해도 분석은 계속
+        }
+      }
+
+      // 7. 완료 처리
+      const analysisScore = Math.max(0, 100 - (result.summary.totalIssues * 2));
       job.status = 'completed';
       job.completedAt = new Date();
-      await this.updateExecutionStatus(executeId, 'COMPLETED', 85);
+      await this.updateExecutionStatus(executeId, 'COMPLETED', analysisScore);
 
-      console.log(`[Pipeline] Execution ${executeId} completed successfully`);
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`[Pipeline] ✅ Execution ${executeId} COMPLETED`);
+      console.log(`   - Files: ${job.filesAnalyzed}`);
+      console.log(`   - Issues: ${job.issuesFound}`);
+      console.log(`   - Duration: ${Date.now() - job.startedAt.getTime()}ms`);
+      console.log(`${'='.repeat(60)}\n`);
 
     } catch (error) {
-      console.error(`[Pipeline] Execution ${executeId} failed:`, error);
+      console.error(`[Pipeline] ❌ Execution ${executeId} FAILED:`, error);
       
       job.status = 'failed';
       job.error = error instanceof Error ? error.message : String(error);
@@ -163,109 +222,235 @@ export class PipelineExecutionService {
   }
 
   /**
-   * 스테이지 실행 (각 단계별 로직)
+   * 프로젝트 파일 수집
    */
-  private async executeStage(
-    stage: string,
-    projectPath: string,
-    options: AnalysisOptions
-  ): Promise<number> {
-    // 스테이지별 지연 시간 (실제 작업 시뮬레이션)
-    const delays: Record<string, number> = {
-      'SOURCE_COLLECT': 500,
-      'LANGUAGE_DETECT': 200,
-      'AST_PARSE': 800,
-      'STATIC_ANALYZE': 1000,
-      'RULE_PARSE': 600,
-      'CATEGORIZE': 300,
-      'NORMALIZE': 200,
-      'AI_ENHANCE': options.enableAI ? 1500 : 100,
-    };
+  private async collectProjectFiles(projectPath: string, executeId: string): Promise<FileInfo[]> {
+    const files: FileInfo[] = [];
+    
+    console.log(`[Pipeline] Scanning directory: ${projectPath}`);
 
-    await new Promise(resolve => setTimeout(resolve, delays[stage] || 500));
+    try {
+      const fs = await import('fs');
+      const path = await import('path');
 
-    // 발견된 이슈 수 반환 (시뮬레이션)
-    const issuesByStage: Record<string, number> = {
-      'SOURCE_COLLECT': 0,
-      'LANGUAGE_DETECT': 0,
-      'AST_PARSE': 0,
-      'STATIC_ANALYZE': 5,
-      'RULE_PARSE': 8,
-      'CATEGORIZE': 0,
-      'NORMALIZE': 0,
-      'AI_ENHANCE': options.enableAI ? 3 : 0,
-    };
+      const walk = (dir: string, base: string = ''): void => {
+        try {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          
+          for (const entry of entries) {
+            const fullPath = path.join(dir, entry.name);
+            const relativePath = base ? path.join(base, entry.name) : entry.name;
+            
+            // 제외 패턴
+            if (entry.name === 'node_modules' || 
+                entry.name === '.git' || 
+                entry.name === 'dist' ||
+                entry.name === '.next' ||
+                entry.name === 'build' ||
+                entry.name === 'coverage' ||
+                entry.name.startsWith('.')) {
+              continue;
+            }
+            
+            if (entry.isDirectory()) {
+              walk(fullPath, relativePath);
+            } else if (entry.isFile()) {
+              const ext = path.extname(entry.name).toLowerCase().slice(1);
+              const supportedExts = ['ts', 'tsx', 'js', 'jsx', 'java', 'py', 'go'];
+              
+              if (supportedExts.includes(ext)) {
+                try {
+                  const content = fs.readFileSync(fullPath, 'utf-8');
+                  const stats = fs.statSync(fullPath);
+                  
+                  // 너무 큰 파일 제외 (1MB)
+                  if (stats.size <= 1024 * 1024) {
+                    files.push({
+                      path: relativePath.replace(/\\/g, '/'),
+                      name: entry.name,
+                      extension: ext,
+                      content,
+                      size: stats.size,
+                      lastModified: stats.mtime,
+                    });
+                  }
+                } catch {
+                  // 파일 읽기 실패 시 스킵
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`[Pipeline] Error reading directory ${dir}:`, err);
+        }
+      };
 
-    return issuesByStage[stage] || 0;
+      if (fs.existsSync(projectPath)) {
+        walk(projectPath);
+      } else {
+        console.log(`[Pipeline] Project path does not exist: ${projectPath}`);
+      }
+
+    } catch (err) {
+      console.error('[Pipeline] File system access error:', err);
+    }
+
+    // 스테이지 업데이트
+    await this.updateStageProgress(executeId, {
+      stage: 'SOURCE_COLLECT' as any,
+      status: 'completed',
+      progress: 100,
+      message: `${files.length}개 파일 수집 완료`,
+    });
+
+    return files;
   }
 
   /**
-   * 샘플 결과 저장
+   * 샘플 파일 (데모/테스트용)
    */
-  private async saveSampleResults(executeId: string, projectId: string): Promise<void> {
-    const sampleIssues = [
+  private getSampleFiles(): FileInfo[] {
+    return [
       {
-        filePath: 'src/index.ts',
-        lineStart: 5, lineEnd: 5,
-        mainCategory: 'SECURITY', subCategory: 'SECRETS',
-        severity: 'HIGH', ruleId: 'SEC001',
-        message: '하드코딩된 비밀번호가 발견되었습니다',
-        suggestion: '환경 변수 또는 시크릿 관리자를 사용하세요',
+        path: 'src/index.ts',
+        name: 'index.ts',
+        extension: 'ts',
+        content: `import { processData } from './utils';
+
+// TODO: This function is too complex
+export function main() {
+  const password = "hardcoded123"; // Security issue
+  console.log("Starting application");
+  
+  try {
+    const result = processData(null);
+    console.log(result);
+  } catch (e) {
+    // Empty catch block
+  }
+  
+  // Deeply nested code (high complexity)
+  if (true) {
+    if (true) {
+      if (true) {
+        if (true) {
+          console.log("Too nested");
+        }
+      }
+    }
+  }
+}
+`,
+        size: 450,
+        lastModified: new Date(),
       },
       {
-        filePath: 'src/index.ts',
-        lineStart: 10, lineEnd: 12,
-        mainCategory: 'QUALITY', subCategory: 'ERROR_HANDLING',
-        severity: 'MEDIUM', ruleId: 'QUA010',
-        message: '빈 catch 블록이 있습니다',
-        suggestion: '오류를 적절히 로깅하거나 처리하세요',
+        path: 'src/utils.ts',
+        name: 'utils.ts',
+        extension: 'ts',
+        content: `export function processData(data: any) {
+  // Using any type is bad practice
+  if (data == null) { // Use === instead
+    return null;
+  }
+  return data.value;
+}
+
+export function unusedFunction() {
+  // This function is never called
+  const apiKey = "sk-abc123"; // Hardcoded secret
+}
+
+// Long function (style issue)
+export function longFunction() {
+  console.log("line 1");
+  console.log("line 2");
+  console.log("line 3");
+  console.log("line 4");
+  console.log("line 5");
+  console.log("line 6");
+  console.log("line 7");
+  console.log("line 8");
+  console.log("line 9");
+  console.log("line 10");
+  return "done";
+}
+`,
+        size: 550,
+        lastModified: new Date(),
       },
       {
-        filePath: 'src/utils.ts',
-        lineStart: 1, lineEnd: 1,
-        mainCategory: 'QUALITY', subCategory: 'TYPE_SAFETY',
-        severity: 'MEDIUM', ruleId: 'QUA005',
-        message: 'any 타입 사용이 발견되었습니다',
-        suggestion: '구체적인 타입을 정의하세요',
-      },
-      {
-        filePath: 'src/utils.ts',
-        lineStart: 3, lineEnd: 3,
-        mainCategory: 'QUALITY', subCategory: 'COMPARISON',
-        severity: 'LOW', ruleId: 'QUA012',
-        message: '== 대신 === 사용을 권장합니다',
-        suggestion: '엄격한 동등 비교 연산자를 사용하세요',
-      },
-      {
-        filePath: 'src/api/handler.ts',
-        lineStart: 6, lineEnd: 6,
-        mainCategory: 'SECURITY', subCategory: 'INJECTION',
-        severity: 'CRITICAL', ruleId: 'SEC002',
-        message: 'SQL 인젝션 취약점이 발견되었습니다',
-        suggestion: '파라미터화된 쿼리를 사용하세요',
+        path: 'src/api/handler.ts',
+        name: 'handler.ts',
+        extension: 'ts',
+        content: `import { query } from './db';
+
+export async function handleRequest(req: any) {
+  const userId = req.params.id;
+  
+  // SQL Injection vulnerability!
+  const sql = \`SELECT * FROM users WHERE id = \${userId}\`;
+  const result = await query(sql);
+  
+  // XSS vulnerability
+  return \`<div>\${req.body.content}</div>\`;
+}
+
+// Command injection
+export function runCommand(userInput: string) {
+  const exec = require('child_process').exec;
+  exec(\`ls \${userInput}\`); // Dangerous!
+}
+
+// Path traversal
+export function readFile(filename: string) {
+  const fs = require('fs');
+  return fs.readFileSync('/uploads/' + filename); // Path traversal risk
+}
+`,
+        size: 650,
+        lastModified: new Date(),
       },
     ];
+  }
 
-    for (const issue of sampleIssues) {
-      await prisma.normalizedAnalysisResult.create({
-        data: {
-          executeId,
-          filePath: issue.filePath,
-          lineStart: issue.lineStart,
-          lineEnd: issue.lineEnd,
-          language: 'typescript',
-          mainCategory: issue.mainCategory,
-          subCategory: issue.subCategory,
-          ruleId: issue.ruleId,
-          severity: issue.severity,
-          message: issue.message,
-          suggestion: issue.suggestion,
-          deterministic: true,
-        },
-      });
+  /**
+   * 분석 결과 DB 저장
+   */
+  private async saveAnalysisResults(executeId: string, result: PipelineResult): Promise<void> {
+    console.log(`[Pipeline] 💾 Saving ${result.normalizedResults.length} results to database...`);
+
+    let savedCount = 0;
+    
+    for (const normalized of result.normalizedResults) {
+      try {
+        await prisma.normalizedAnalysisResult.create({
+          data: {
+            executeId,
+            filePath: normalized.filePath,
+            lineStart: normalized.lineStart,
+            lineEnd: normalized.lineEnd,
+            language: normalized.language || 'typescript',
+            mainCategory: normalized.mainCategory,
+            subCategory: normalized.subCategory,
+            ruleId: normalized.ruleId || 'UNKNOWN',
+            severity: normalized.severity,
+            message: normalized.message,
+            suggestion: normalized.suggestion,
+            rawResult: normalized.rawResult ? JSON.stringify(normalized.rawResult) : null,
+            aiExplanation: normalized.aiExplanation,
+            aiSuggestion: normalized.aiSuggestion,
+            aiSecurityAdvice: normalized.aiSecurityAdvice,
+            deterministic: normalized.deterministic ?? true,
+          },
+        });
+        savedCount++;
+      } catch (err) {
+        console.error(`[Pipeline] Failed to save result:`, err);
+      }
     }
 
-    console.log(`[Pipeline] Saved ${sampleIssues.length} sample results`);
+    console.log(`[Pipeline] ✓ Saved ${savedCount}/${result.normalizedResults.length} results`);
   }
 
   /**
@@ -298,22 +483,16 @@ export class PipelineExecutionService {
   /**
    * 스테이지 진행 상황 업데이트
    */
-  private async updateStageProgress(
-    executeId: string,
-    stage: string,
-    status: string,
-    progress: number,
-    message: string
-  ): Promise<void> {
+  private async updateStageProgress(executeId: string, stage: StageProgress): Promise<void> {
     try {
       await prisma.pipelineStageExecution.updateMany({
-        where: { executeId, stage },
+        where: { executeId, stage: stage.stage },
         data: {
-          status,
-          progress,
-          message,
-          startedAt: status === 'running' ? new Date() : undefined,
-          completedAt: status === 'completed' ? new Date() : undefined,
+          status: stage.status,
+          progress: stage.progress,
+          message: stage.message,
+          startedAt: stage.status === 'running' ? new Date() : undefined,
+          completedAt: stage.status === 'completed' ? new Date() : undefined,
         },
       });
     } catch (error) {

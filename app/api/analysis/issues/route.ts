@@ -31,6 +31,11 @@ export async function GET(request: NextRequest) {
     const severity = searchParams.get('severity');
     const category = searchParams.get('category');
     const filePath = searchParams.get('filePath');
+    const search = searchParams.get('search');
+    
+    // 정렬
+    const sortField = searchParams.get('sortField') || 'severity';
+    const sortOrder = searchParams.get('sortOrder') || 'asc';
 
     // 쿼리 조건 빌드
     const where: Record<string, unknown> = {};
@@ -55,6 +60,32 @@ export async function GET(request: NextRequest) {
       where.filePath = { contains: filePath };
     }
 
+    // 검색 조건
+    if (search && search.trim()) {
+      where.OR = [
+        { message: { contains: search } },
+        { filePath: { contains: search } },
+        { suggestion: { contains: search } },
+        { ruleId: { contains: search } },
+      ];
+    }
+
+    // 정렬 조건 빌드
+    const orderBy: Record<string, string>[] = [];
+    
+    if (sortField === 'severity') {
+      orderBy.push({ severity: sortOrder });
+    } else if (sortField === 'category') {
+      orderBy.push({ mainCategory: sortOrder });
+    } else if (sortField === 'file') {
+      orderBy.push({ filePath: sortOrder });
+    } else if (sortField === 'date') {
+      orderBy.push({ createdAt: sortOrder === 'asc' ? 'asc' : 'desc' });
+    } else {
+      orderBy.push({ severity: 'asc' });
+    }
+    orderBy.push({ createdAt: 'desc' });
+
     // 총 개수
     const total = await prisma.normalizedAnalysisResult.count({ where });
 
@@ -63,10 +94,7 @@ export async function GET(request: NextRequest) {
       where,
       take: limit,
       skip: offset,
-      orderBy: [
-        { severity: 'asc' }, // CRITICAL 먼저
-        { createdAt: 'desc' }
-      ],
+      orderBy,
       include: {
         execute: {
           select: {

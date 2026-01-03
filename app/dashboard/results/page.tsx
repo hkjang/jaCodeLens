@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { 
   BarChart3, Filter, ArrowLeft, ArrowRight, FileCode, AlertTriangle,
   Check, X, Eye, EyeOff, MessageSquare, CheckCircle, XCircle,
-  Download, RefreshCw, Bookmark, Share2, MoreVertical
+  Download, RefreshCw, Bookmark, Share2, MoreVertical, Search,
+  ArrowUpDown, FileDown, ChevronUp, ChevronDown
 } from 'lucide-react';
 import { ActionMenu, ActionMenuItem } from '@/components/ui/ActionMenu';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -71,6 +72,9 @@ export default function ResultsPage() {
   const [page, setPage] = useState(1);
   const [severityFilter, setSeverityFilter] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [sortField, setSortField] = useState<string>('severity');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const pageSize = 20;
   
   // CUD 상태
@@ -87,7 +91,33 @@ export default function ResultsPage() {
 
   useEffect(() => {
     fetchData();
-  }, [page, severityFilter, categoryFilter]);
+  }, [page, severityFilter, categoryFilter, sortField, sortOrder]);
+
+  // CSV 내보내기
+  function exportToCSV() {
+    const headers = ['심각도', '카테고리', '파일', '라인', '메시지', '제안'];
+    const rows = issues.map(i => [
+      i.severity,
+      i.mainCategory,
+      i.filePath,
+      `${i.lineStart}-${i.lineEnd}`,
+      i.message.replace(/"/g, '""'),
+      (i.suggestion || '').replace(/"/g, '""')
+    ]);
+    
+    const csv = [
+      headers.join(','),
+      ...rows.map(r => r.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+    
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `analysis-results-${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 
   async function fetchData() {
     setLoading(true);
@@ -97,6 +127,9 @@ export default function ResultsPage() {
       params.set('offset', ((page - 1) * pageSize).toString());
       if (severityFilter) params.set('severity', severityFilter);
       if (categoryFilter) params.set('category', categoryFilter);
+      if (searchQuery) params.set('search', searchQuery);
+      if (sortField) params.set('sortField', sortField);
+      params.set('sortOrder', sortOrder);
 
       const [issuesRes, statsRes] = await Promise.all([
         fetch(`/api/analysis/issues?${params}`),
@@ -105,13 +138,20 @@ export default function ResultsPage() {
 
       if (issuesRes.ok) {
         const data = await issuesRes.json();
-        setIssues(data.items.map((i: Issue) => ({ ...i, status: i.status || 'NEW', selected: false })));
-        setTotal(data.total);
+        const items = data.items || data.issues || [];
+        setIssues(items.map((i: Issue) => ({ ...i, status: i.status || 'NEW', selected: false })));
+        setTotal(data.total || data.pagination?.total || 0);
       }
 
       if (statsRes.ok) {
         const data = await statsRes.json();
-        setStats(data);
+        setStats({
+          criticalCount: data.bySeverity?.CRITICAL || 0,
+          highCount: data.bySeverity?.HIGH || 0,
+          mediumCount: data.bySeverity?.MEDIUM || 0,
+          lowCount: data.bySeverity?.LOW || 0,
+          infoCount: data.bySeverity?.INFO || 0,
+        });
       }
     } catch (e) {
       console.error('Failed to fetch data', e);
@@ -354,23 +394,83 @@ export default function ResultsPage() {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex items-center gap-4 p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-        <Filter className="w-5 h-5 text-gray-400" />
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-500">심각도:</span>
-          <FilterLink onClick={() => setSeverityFilter('')} label="전체" active={!severityFilter} />
-          <FilterLink onClick={() => setSeverityFilter('CRITICAL')} label="Critical" active={severityFilter === 'CRITICAL'} />
-          <FilterLink onClick={() => setSeverityFilter('HIGH')} label="High" active={severityFilter === 'HIGH'} />
-          <FilterLink onClick={() => setSeverityFilter('MEDIUM')} label="Medium" active={severityFilter === 'MEDIUM'} />
+      {/* Filters & Search */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-4">
+        {/* 검색바 */}
+        <div className="flex items-center gap-4">
+          <div className="flex-1 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="메시지, 파일 경로, 제안으로 검색..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && fetchData()}
+              className="w-full pl-10 pr-4 py-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          
+          {/* 정렬 */}
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="w-4 h-4 text-gray-400" />
+            <select
+              value={sortField}
+              onChange={(e) => setSortField(e.target.value)}
+              className="px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
+            >
+              <option value="severity">심각도순</option>
+              <option value="category">카테고리순</option>
+              <option value="file">파일순</option>
+              <option value="date">최신순</option>
+            </select>
+            <button
+              onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+              title={sortOrder === 'asc' ? '오름차순' : '내림차순'}
+            >
+              {sortOrder === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          </div>
+
+          {/* 내보내기 */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => exportToCSV()}
+              className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg"
+            >
+              <FileDown className="w-4 h-4" />
+              CSV
+            </button>
+            <button
+              onClick={() => window.print()}
+              className="flex items-center gap-2 px-3 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm rounded-lg"
+            >
+              <Download className="w-4 h-4" />
+              출력
+            </button>
+          </div>
         </div>
-        <div className="border-l border-gray-200 dark:border-gray-700 h-6" />
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-500">카테고리:</span>
-          <FilterLink onClick={() => setCategoryFilter('')} label="전체" active={!categoryFilter} />
-          <FilterLink onClick={() => setCategoryFilter('SECURITY')} label="보안" active={categoryFilter === 'SECURITY'} />
-          <FilterLink onClick={() => setCategoryFilter('QUALITY')} label="품질" active={categoryFilter === 'QUALITY'} />
-          <FilterLink onClick={() => setCategoryFilter('STRUCTURE')} label="구조" active={categoryFilter === 'STRUCTURE'} />
+
+        {/* 필터 태그들 */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <Filter className="w-4 h-4 text-gray-400" />
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500">심각도:</span>
+            <FilterLink onClick={() => setSeverityFilter('')} label="전체" active={!severityFilter} />
+            <FilterLink onClick={() => setSeverityFilter('CRITICAL')} label="Critical" active={severityFilter === 'CRITICAL'} />
+            <FilterLink onClick={() => setSeverityFilter('HIGH')} label="High" active={severityFilter === 'HIGH'} />
+            <FilterLink onClick={() => setSeverityFilter('MEDIUM')} label="Medium" active={severityFilter === 'MEDIUM'} />
+            <FilterLink onClick={() => setSeverityFilter('LOW')} label="Low" active={severityFilter === 'LOW'} />
+          </div>
+          <div className="border-l border-gray-200 dark:border-gray-700 h-6" />
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500">카테고리:</span>
+            <FilterLink onClick={() => setCategoryFilter('')} label="전체" active={!categoryFilter} />
+            <FilterLink onClick={() => setCategoryFilter('SECURITY')} label="보안" active={categoryFilter === 'SECURITY'} />
+            <FilterLink onClick={() => setCategoryFilter('QUALITY')} label="품질" active={categoryFilter === 'QUALITY'} />
+            <FilterLink onClick={() => setCategoryFilter('STRUCTURE')} label="구조" active={categoryFilter === 'STRUCTURE'} />
+            <FilterLink onClick={() => setCategoryFilter('OPERATIONS')} label="운영" active={categoryFilter === 'OPERATIONS'} />
+          </div>
         </div>
       </div>
 
