@@ -24,7 +24,7 @@ import {
   AlertTriangle, TrendingUp, GitBranch, Clock, FolderTree,
   PieChart, Activity, Star, StarOff, Copy, ExternalLink,
   Download, ChevronUp, SortAsc, SortDesc, Keyboard, FileJson,
-  Table, X, Maximize2, Minimize2, FileText
+  Table, X, Maximize2, Minimize2, FileText, Globe
 } from 'lucide-react';
 import DependencyGraph from '@/components/code-elements/DependencyGraph';
 
@@ -771,6 +771,15 @@ export default function ProjectCodeElementsPage() {
               </a>
             </div>
           </div>
+
+          {/* API 엔드포인트 맵 링크 */}
+          <Link
+            href={`/dashboard/projects/${projectId}/endpoints`}
+            className="flex items-center gap-2 px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-green-300 dark:hover:border-green-600 transition-colors"
+          >
+            <Globe className="w-4 h-4 text-green-500" />
+            API Map
+          </Link>
 
           <button
             onClick={handleScan}
