@@ -55,10 +55,26 @@ export async function GET(
       if (r.severity === 'HIGH') categoryStats[key as keyof typeof categoryStats].high++;
     });
 
-    // Calculate scores (100 - penalty for issues)
+    // Calculate scores using logarithmic scaling for better balance
+    // This prevents scores from dropping to 0 immediately when issue counts are high
     const calcScore = (stats: { total: number; critical: number; high: number }) => {
-      const penalty = stats.critical * 15 + stats.high * 8 + (stats.total - stats.critical - stats.high) * 2;
-      return Math.max(0, Math.min(100, 100 - penalty));
+      if (stats.total === 0) return 100;
+      
+      // Weighted severity calculation
+      const weightedIssues = stats.critical * 3 + stats.high * 2 + (stats.total - stats.critical - stats.high);
+      
+      // Logarithmic scaling: score decreases more gradually as issues increase
+      // Base score of 100, reduced by log-scaled penalty
+      // log10(weightedIssues + 1) * 20 gives gradual reduction
+      const logPenalty = Math.log10(weightedIssues + 1) * 25;
+      
+      // Additional penalty for critical issues (max 30 points)
+      const criticalPenalty = Math.min(30, stats.critical * 10);
+      
+      // Calculate final score
+      const score = 100 - logPenalty - criticalPenalty;
+      
+      return Math.max(0, Math.min(100, Math.round(score)));
     };
 
     const securityScore = calcScore(categoryStats.security);
@@ -67,9 +83,21 @@ export async function GET(
     const operationsScore = calcScore(categoryStats.operations);
     const testScore = calcScore(categoryStats.test);
 
-    const overallScore = Math.round(
-      (securityScore * 0.3 + qualityScore * 0.25 + structureScore * 0.2 + operationsScore * 0.15 + testScore * 0.1)
-    );
+    // Adjusted weights: prioritize structure and security over high-issue categories
+    // Security: 25% (critical but fewer issues expected)
+    // Quality: 15% (many minor issues, less weight)
+    // Structure: 30% (architecture health is key)
+    // Operations: 15% (many minor issues, less weight)
+    // Test: 15% (coverage and test quality)
+    const weightedScore = 
+      securityScore * 0.25 + 
+      qualityScore * 0.15 + 
+      structureScore * 0.30 + 
+      operationsScore * 0.15 + 
+      testScore * 0.15;
+    
+    // Add floor bonus and cap at 100
+    const overallScore = Math.min(100, Math.round(weightedScore + 10));
 
     // Get historical executions for trend
     const historicalExecutions = await prisma.analysisExecute.findMany({

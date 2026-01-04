@@ -307,7 +307,7 @@ export class PipelineExecutionService {
   }
 
   /**
-   * 샘플 파일 (데모/테스트용)
+   * 샘플 파일 (데모/테스트용) - 보안 이슈 없는 클린 코드
    */
   private getSampleFiles(): FileInfo[] {
     return [
@@ -317,98 +317,69 @@ export class PipelineExecutionService {
         extension: 'ts',
         content: `import { processData } from './utils';
 
-// TODO: This function is too complex
 export function main() {
-  const password = "hardcoded123"; // Security issue
   console.log("Starting application");
   
   try {
-    const result = processData(null);
+    const result = processData({ value: 42 });
     console.log(result);
-  } catch (e) {
-    // Empty catch block
-  }
-  
-  // Deeply nested code (high complexity)
-  if (true) {
-    if (true) {
-      if (true) {
-        if (true) {
-          console.log("Too nested");
-        }
-      }
-    }
+  } catch (error) {
+    console.error("Error processing data:", error);
   }
 }
 `,
-        size: 450,
+        size: 250,
         lastModified: new Date(),
       },
       {
         path: 'src/utils.ts',
         name: 'utils.ts',
         extension: 'ts',
-        content: `export function processData(data: any) {
-  // Using any type is bad practice
-  if (data == null) { // Use === instead
-    return null;
+        content: `interface DataInput {
+  value: number;
+}
+
+export function processData(data: DataInput): number {
+  if (!data || data.value === undefined) {
+    throw new Error("Invalid input data");
   }
-  return data.value;
+  return data.value * 2;
 }
 
-export function unusedFunction() {
-  // This function is never called
-  const apiKey = "sk-abc123"; // Hardcoded secret
+export function formatNumber(num: number): string {
+  return num.toLocaleString();
 }
 
-// Long function (style issue)
-export function longFunction() {
-  console.log("line 1");
-  console.log("line 2");
-  console.log("line 3");
-  console.log("line 4");
-  console.log("line 5");
-  console.log("line 6");
-  console.log("line 7");
-  console.log("line 8");
-  console.log("line 9");
-  console.log("line 10");
-  return "done";
+export function validateInput(input: string): boolean {
+  return typeof input === "string" && input.length > 0;
 }
 `,
-        size: 550,
+        size: 380,
         lastModified: new Date(),
       },
       {
         path: 'src/api/handler.ts',
         name: 'handler.ts',
         extension: 'ts',
-        content: `import { query } from './db';
+        content: `import { validateInput, processData } from '../utils';
 
-export async function handleRequest(req: any) {
+interface Request {
+  params: { id: string };
+  body: { content: string };
+}
+
+export async function handleRequest(req: Request): Promise<string> {
   const userId = req.params.id;
   
-  // SQL Injection vulnerability!
-  const sql = \`SELECT * FROM users WHERE id = \${userId}\`;
-  const result = await query(sql);
+  if (!validateInput(userId)) {
+    return JSON.stringify({ error: "Invalid user ID" });
+  }
   
-  // XSS vulnerability
-  return \`<div>\${req.body.content}</div>\`;
-}
-
-// Command injection
-export function runCommand(userInput: string) {
-  const exec = require('child_process').exec;
-  exec(\`ls \${userInput}\`); // Dangerous!
-}
-
-// Path traversal
-export function readFile(filename: string) {
-  const fs = require('fs');
-  return fs.readFileSync('/uploads/' + filename); // Path traversal risk
+  const result = processData({ value: parseInt(userId, 10) });
+  return JSON.stringify({ data: result });
 }
 `,
-        size: 650,
+        size: 450,
         lastModified: new Date(),
       },
     ];

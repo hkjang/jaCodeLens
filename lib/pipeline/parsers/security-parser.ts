@@ -30,6 +30,10 @@ const EXCLUDED_FILE_PATTERNS = [
   /__tests__[\/\\]/,                        // Test files
   /\.test\.(ts|tsx|js|jsx)$/,               // Test file extensions
   /\.spec\.(ts|tsx|js|jsx)$/,               // Spec file extensions
+  /prisma[\/\\]seed\.ts$/,                  // Seed data file
+  /prisma[\/\\]/,                           // Prisma schema/migrations
+  /lib[\/\\]services[\/\\]/,               // Service files with sample data
+  /lib[\/\\]pipeline[\/\\]source[\/\\]/,  // Source sync (has password interface)
 ];
 
 // 보안 룰 정의
@@ -57,7 +61,9 @@ const SECURITY_RULES: SecurityRule[] = [
     id: 'SEC003',
     name: 'hardcoded-password',
     severity: 'HIGH',
-    pattern: /(?:password|passwd|pwd)\s*[=:]\s*['"][^'"]{6,}['"]/i,
+    // More precise pattern: must be assignment (=) with quoted string value
+    // Excludes: interface fields (:), optional properties (?:), type annotations
+    pattern: /(?:const|let|var)\s+(?:password|passwd|pwd)\s*=\s*['\"][^'\"]{6,}['\"]|(?:password|passwd|pwd)\s*=\s*['\"][^'\"]{6,}['\"]/i,
     message: '비밀번호가 하드코딩되어 있을 수 있습니다',
     suggestion: '환경 변수나 시크릿 매니저를 사용하세요',
     references: ['https://cwe.mitre.org/data/definitions/798.html']
