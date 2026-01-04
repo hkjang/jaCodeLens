@@ -229,7 +229,27 @@ export default function ApiEndpointsPage() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [detailTab, setDetailTab] = useState<'info' | 'analysis' | 'sdk' | 'mock' | 'deps'>('info');
+  const [detailTab, setDetailTab] = useState<'info' | 'analysis' | 'sdk' | 'mock' | 'deps' | 'test'>('info');
+  
+  // v4 추가 기능
+  const [showTryIt, setShowTryIt] = useState(false);
+  const [testRequest, setTestRequest] = useState({ 
+    headers: '{\n  "Content-Type": "application/json"\n}',
+    body: '{}',
+    queryParams: ''
+  });
+  const [testResponse, setTestResponse] = useState<{ status: number; body: string; time: number } | null>(null);
+  const [isTestLoading, setIsTestLoading] = useState(false);
+  const [showSimilarityPanel, setShowSimilarityPanel] = useState(false);
+  const [showAdvancedStats, setShowAdvancedStats] = useState(false);
+  
+  // v5 추가 기능
+  const [quickFilter, setQuickFilter] = useState<string | null>(null); // 'auth', 'deprecated', 'complex', 'lowHealth'
+  const [selectedEndpoints, setSelectedEndpoints] = useState<Set<string>>(new Set());
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareEndpoints, setCompareEndpoints] = useState<[ApiEndpoint | null, ApiEndpoint | null]>([null, null]);
+  const [showCompareModal, setShowCompareModal] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(-1);
   
   // 즐겨찾기 (localStorage)
   const [favorites, setFavorites] = useState<Set<string>>(() => {
@@ -293,9 +313,28 @@ export default function ApiEndpointsPage() {
         ep.handler.toLowerCase().includes(searchQuery.toLowerCase()) ||
         ep.filePath.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesMethod = !selectedMethod || ep.method === selectedMethod;
-      return matchesSearch && matchesMethod;
+      
+      // 빠른 필터
+      let matchesQuickFilter = true;
+      if (quickFilter === 'auth') {
+        matchesQuickFilter = !!(ep.auth && ep.auth !== 'none');
+      } else if (quickFilter === 'noAuth') {
+        matchesQuickFilter = !ep.auth || ep.auth === 'none';
+      } else if (quickFilter === 'deprecated') {
+        matchesQuickFilter = !!ep.deprecated;
+      } else if (quickFilter === 'complex') {
+        matchesQuickFilter = !!(ep.complexity && ep.complexity.score >= 7);
+      } else if (quickFilter === 'lowHealth') {
+        matchesQuickFilter = !!(ep.healthScore && ep.healthScore.overall < 50);
+      } else if (quickFilter === 'favorites') {
+        matchesQuickFilter = favorites.has(ep.id);
+      } else if (quickFilter === 'duplicate') {
+        matchesQuickFilter = !!ep.similarity?.potentialDuplicate;
+      }
+      
+      return matchesSearch && matchesMethod && matchesQuickFilter;
     });
-  }, [endpoints, searchQuery, selectedMethod]);
+  }, [endpoints, searchQuery, selectedMethod, quickFilter, favorites]);
   
   // 필터링된 그룹
   const filteredGroups = useMemo(() => {
@@ -387,6 +426,23 @@ export default function ApiEndpointsPage() {
     }
     return curl;
   }, []);
+  
+  // 엔드포인트 선택 핸들러 (비교 모드 지원)
+  const handleEndpointSelect = useCallback((ep: ApiEndpoint) => {
+    if (compareMode) {
+      // 비교 모드: 비교 패널에 추가
+      setCompareEndpoints(prev => {
+        if (!prev[0]) return [ep, prev[1]];
+        if (!prev[1]) return [prev[0], ep];
+        return [ep, prev[1]]; // 첫 번째 교체
+      });
+    } else {
+      // 일반 모드: 상세 패널에 표시
+      setSelectedEndpoint(ep);
+      setRecentlyViewed(prev => [ep.id, ...prev.filter(id => id !== ep.id)].slice(0, 10));
+      setDetailTab('info');
+    }
+  }, [compareMode]);
   
   // OpenAPI 3.0 내보내기
   const exportToOpenAPI = useCallback(() => {
@@ -586,6 +642,54 @@ export default function ApiEndpointsPage() {
           ))}
           
           <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-2" />
+          
+          {/* 빠른 필터 */}
+          <div className="flex items-center gap-1">
+            {[
+              { key: 'favorites', label: '⭐', title: '즐겨찾기' },
+              { key: 'auth', label: '🔒', title: '인증 있음' },
+              { key: 'noAuth', label: '🔓', title: '인증 없음' },
+              { key: 'deprecated', label: '⚠️', title: 'Deprecated' },
+              { key: 'complex', label: '🔴', title: '복잡도 높음' },
+              { key: 'lowHealth', label: '💔', title: '헬스 낮음' },
+              { key: 'duplicate', label: '👯', title: '중복 가능성' },
+            ].map(f => (
+              <button
+                key={f.key}
+                onClick={() => setQuickFilter(quickFilter === f.key ? null : f.key)}
+                className={`px-2 py-1 text-xs rounded transition ${
+                  quickFilter === f.key
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'
+                }`}
+                title={f.title}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          
+          <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-2" />
+          
+          {/* 비교 모드 */}
+          <button
+            onClick={() => {
+              setCompareMode(!compareMode);
+              if (compareMode) {
+                setCompareEndpoints([null, null]);
+                setSelectedEndpoints(new Set());
+              }
+            }}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center gap-1 ${
+              compareMode
+                ? 'bg-purple-500 text-white'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+            }`}
+            title="비교 모드"
+          >
+            <Layers className="w-3.5 h-3.5" />
+            {compareMode ? '비교 중' : '비교'}
+          </button>
           
           {/* 뷰 모드 */}
           <button
@@ -894,6 +998,7 @@ export default function ApiEndpointsPage() {
                   { key: 'sdk', label: 'SDK', icon: Code2 },
                   { key: 'mock', label: 'Mock', icon: Box },
                   { key: 'deps', label: '의존성', icon: GitBranch },
+                  { key: 'test', label: 'Test', icon: Play },
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -1331,6 +1436,147 @@ export default function ApiEndpointsPage() {
                     )}
                   </div>
                 )}
+                
+                {/* Test 탭 (Try It Now) */}
+                {detailTab === 'test' && (
+                  <div className="space-y-4">
+                    {/* 요청 URL 미리보기 */}
+                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 text-xs font-bold rounded ${methodColors[selectedEndpoint.method].bg} ${methodColors[selectedEndpoint.method].text}`}>
+                          {selectedEndpoint.method}
+                        </span>
+                        <code className="text-sm text-gray-700 dark:text-gray-300 break-all">
+                          http://localhost:3000{selectedEndpoint.path}{testRequest.queryParams ? `?${testRequest.queryParams}` : ''}
+                        </code>
+                      </div>
+                    </div>
+                    
+                    {/* Query Parameters */}
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Query Parameters</h4>
+                      <input
+                        type="text"
+                        placeholder="key1=value1&key2=value2"
+                        value={testRequest.queryParams}
+                        onChange={e => setTestRequest(prev => ({ ...prev, queryParams: e.target.value }))}
+                        className="w-full px-3 py-2 text-xs font-mono bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      />
+                    </div>
+                    
+                    {/* Headers */}
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Headers (JSON)</h4>
+                      <textarea
+                        value={testRequest.headers}
+                        onChange={e => setTestRequest(prev => ({ ...prev, headers: e.target.value }))}
+                        className="w-full h-20 px-3 py-2 text-xs font-mono bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                      />
+                    </div>
+                    
+                    {/* Request Body */}
+                    {['POST', 'PUT', 'PATCH'].includes(selectedEndpoint.method) && (
+                      <div>
+                        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">Request Body (JSON)</h4>
+                        <textarea
+                          value={testRequest.body}
+                          onChange={e => setTestRequest(prev => ({ ...prev, body: e.target.value }))}
+                          className="w-full h-24 px-3 py-2 text-xs font-mono bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
+                          placeholder="{}"
+                        />
+                      </div>
+                    )}
+                    
+                    {/* Execute Button */}
+                    <button
+                      onClick={async () => {
+                        setIsTestLoading(true);
+                        setTestResponse(null);
+                        const startTime = Date.now();
+                        try {
+                          const url = `http://localhost:3000${selectedEndpoint.path}${testRequest.queryParams ? `?${testRequest.queryParams}` : ''}`;
+                          const headers = JSON.parse(testRequest.headers);
+                          const options: RequestInit = {
+                            method: selectedEndpoint.method,
+                            headers,
+                          };
+                          if (['POST', 'PUT', 'PATCH'].includes(selectedEndpoint.method) && testRequest.body) {
+                            options.body = testRequest.body;
+                          }
+                          const res = await fetch(url, options);
+                          const body = await res.text();
+                          setTestResponse({
+                            status: res.status,
+                            body: body,
+                            time: Date.now() - startTime,
+                          });
+                        } catch (err) {
+                          setTestResponse({
+                            status: 0,
+                            body: err instanceof Error ? err.message : 'Request failed',
+                            time: Date.now() - startTime,
+                          });
+                        } finally {
+                          setIsTestLoading(false);
+                        }
+                      }}
+                      disabled={isTestLoading}
+                      className="w-full py-2.5 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg text-sm font-medium hover:from-green-600 hover:to-emerald-700 transition flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      {isTestLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          요청 중...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-4 h-4" />
+                          요청 실행
+                        </>
+                      )}
+                    </button>
+                    
+                    {/* Response */}
+                    {testResponse && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-semibold text-gray-400 uppercase">Response</h4>
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 text-xs font-mono rounded ${
+                              testResponse.status >= 200 && testResponse.status < 300 ? 'bg-green-100 text-green-700' :
+                              testResponse.status >= 400 && testResponse.status < 500 ? 'bg-yellow-100 text-yellow-700' :
+                              testResponse.status >= 500 ? 'bg-red-100 text-red-700' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>
+                              {testResponse.status || 'Error'}
+                            </span>
+                            <span className="text-[10px] text-gray-400">{testResponse.time}ms</span>
+                          </div>
+                        </div>
+                        <pre className={`text-xs p-3 rounded-lg overflow-x-auto max-h-60 ${
+                          testResponse.status >= 200 && testResponse.status < 300 
+                            ? 'bg-gray-900 text-green-400' 
+                            : 'bg-red-900/50 text-red-300'
+                        }`}>
+                          {(() => {
+                            try {
+                              return JSON.stringify(JSON.parse(testResponse.body), null, 2);
+                            } catch {
+                              return testResponse.body;
+                            }
+                          })()}
+                        </pre>
+                        <button
+                          onClick={() => copyToClipboard(testResponse.body, 'test-response')}
+                          className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                        >
+                          {copied === 'test-response' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                          응답 복사
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </motion.aside>
           )}
@@ -1362,31 +1608,101 @@ export default function ApiEndpointsPage() {
             initial={{ opacity: 0, x: 100 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 100 }}
-            className="fixed right-4 top-20 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-4 z-50"
+            className="fixed right-4 top-20 w-80 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-4 z-50 max-h-[calc(100vh-8rem)] overflow-y-auto"
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <PieChart className="w-4 h-4 text-purple-500" />
-                API 통계
+                API 통계 대시보드
               </h3>
               <button onClick={() => setShowStats(false)} className="text-gray-400 hover:text-gray-600">
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="space-y-4">
+              {/* 총 엔드포인트 */}
               <div className="text-center p-4 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl text-white">
                 <div className="text-3xl font-bold">{stats.total}</div>
                 <div className="text-sm opacity-80">총 엔드포인트</div>
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                {Object.entries(stats.byMethod).map(([method, count]) => (
-                  <div key={method} className={`text-center p-2 rounded-lg ${methodColors[method]?.bg || 'bg-gray-100'}`}>
-                    <div className={`text-lg font-bold ${methodColors[method]?.text || 'text-gray-700'}`}>{count}</div>
-                    <div className="text-[10px] opacity-70">{method}</div>
-                  </div>
-                ))}
+              
+              {/* 메서드별 분포 */}
+              <div>
+                <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">메서드 분포</h4>
+                <div className="space-y-2">
+                  {Object.entries(stats.byMethod).map(([method, count]) => (
+                    <div key={method} className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${methodColors[method]?.bg} ${methodColors[method]?.text}`}>
+                        {method}
+                      </span>
+                      <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full ${
+                            method === 'GET' ? 'bg-green-500' :
+                            method === 'POST' ? 'bg-blue-500' :
+                            method === 'PUT' ? 'bg-yellow-500' :
+                            method === 'PATCH' ? 'bg-orange-500' :
+                            method === 'DELETE' ? 'bg-red-500' :
+                            'bg-gray-500'
+                          }`}
+                          style={{ width: `${(count / stats.total) * 100}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-gray-500 w-8 text-right">{count}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="text-xs text-gray-400 text-center">
+              
+              {/* 헬스 스코어 분포 */}
+              <div>
+                <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">헬스 스코어 분포</h4>
+                <div className="grid grid-cols-4 gap-1">
+                  <div className="text-center p-2 rounded bg-green-100 dark:bg-green-900/30">
+                    <div className="text-sm font-bold text-green-600">{endpoints.filter(e => e.healthScore && e.healthScore.overall >= 80).length}</div>
+                    <div className="text-[9px] text-green-700">우수</div>
+                  </div>
+                  <div className="text-center p-2 rounded bg-blue-100 dark:bg-blue-900/30">
+                    <div className="text-sm font-bold text-blue-600">{endpoints.filter(e => e.healthScore && e.healthScore.overall >= 60 && e.healthScore.overall < 80).length}</div>
+                    <div className="text-[9px] text-blue-700">양호</div>
+                  </div>
+                  <div className="text-center p-2 rounded bg-yellow-100 dark:bg-yellow-900/30">
+                    <div className="text-sm font-bold text-yellow-600">{endpoints.filter(e => e.healthScore && e.healthScore.overall >= 40 && e.healthScore.overall < 60).length}</div>
+                    <div className="text-[9px] text-yellow-700">보통</div>
+                  </div>
+                  <div className="text-center p-2 rounded bg-red-100 dark:bg-red-900/30">
+                    <div className="text-sm font-bold text-red-600">{endpoints.filter(e => e.healthScore && e.healthScore.overall < 40).length}</div>
+                    <div className="text-[9px] text-red-700">개선필요</div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* 보안 현황 */}
+              <div>
+                <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">보안 현황</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex items-center gap-2 text-xs bg-green-50 dark:bg-green-900/20 p-2 rounded">
+                    <Shield className="w-3.5 h-3.5 text-green-500" />
+                    <span className="text-green-700 dark:text-green-400">인증 적용: {endpoints.filter(e => e.auth && e.auth !== 'none').length}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
+                    <Zap className="w-3.5 h-3.5 text-blue-500" />
+                    <span className="text-blue-700 dark:text-blue-400">Rate Limit: {endpoints.filter(e => e.rateLimit).length}</span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* 유사 엔드포인트 */}
+              <div>
+                <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">중복 가능성</h4>
+                <div className="text-center p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                  <div className="text-xl font-bold text-orange-600">{endpoints.filter(e => e.similarity?.potentialDuplicate).length}</div>
+                  <div className="text-[10px] text-orange-700">잠재적 중복 엔드포인트</div>
+                </div>
+              </div>
+              
+              {/* 프레임워크 */}
+              <div className="text-xs text-gray-400 text-center pt-2 border-t border-gray-200 dark:border-gray-700">
                 Framework: <span className="font-medium text-gray-600 dark:text-gray-300 uppercase">{framework}</span>
               </div>
             </div>
@@ -1460,6 +1776,87 @@ export default function ApiEndpointsPage() {
             </button>
           </motion.div>
         </div>
+      )}
+      
+      {/* 비교 모달 */}
+      {compareMode && (compareEndpoints[0] || compareEndpoints[1]) && (
+        <motion.div
+          initial={{ opacity: 0, y: 50 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 p-4 z-50 w-[800px] max-w-[90vw]"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <Layers className="w-4 h-4 text-purple-500" />
+              엔드포인트 비교 ({(compareEndpoints[0] ? 1 : 0) + (compareEndpoints[1] ? 1 : 0)}/2)
+            </h3>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setCompareEndpoints([null, null]); }}
+                className="text-xs text-gray-500 hover:text-gray-700"
+              >
+                초기화
+              </button>
+              <button
+                onClick={() => { setCompareMode(false); setCompareEndpoints([null, null]); }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            {[0, 1].map(idx => {
+              const ep = compareEndpoints[idx];
+              return (
+                <div key={idx} className={`rounded-lg p-3 ${ep ? 'bg-gray-50 dark:bg-gray-700' : 'bg-gray-100 dark:bg-gray-750 border-2 border-dashed border-gray-300 dark:border-gray-600'}`}>
+                  {ep ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${methodColors[ep.method].bg} ${methodColors[ep.method].text}`}>
+                            {ep.method}
+                          </span>
+                          <code className="text-xs text-gray-700 dark:text-gray-300 truncate max-w-[150px]">{ep.path}</code>
+                        </div>
+                        <button onClick={() => setCompareEndpoints(prev => { const n = [...prev] as [ApiEndpoint | null, ApiEndpoint | null]; n[idx] = null; return n; })} className="text-gray-400 hover:text-red-500">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-5 gap-1 text-center">
+                        {[
+                          { label: '헬스', value: ep.healthScore?.overall ?? '-', color: (ep.healthScore?.overall ?? 0) >= 60 ? 'text-green-600' : 'text-red-600' },
+                          { label: '보안', value: ep.healthScore?.security ?? '-', color: (ep.healthScore?.security ?? 0) >= 60 ? 'text-green-600' : 'text-red-600' },
+                          { label: '복잡도', value: ep.complexity?.score ?? '-', color: (ep.complexity?.score ?? 0) <= 5 ? 'text-green-600' : 'text-red-600' },
+                          { label: '인증', value: ep.auth !== 'none' && ep.auth ? '✓' : '✗', color: ep.auth && ep.auth !== 'none' ? 'text-green-600' : 'text-yellow-600' },
+                          { label: '문서', value: ep.documentationScore?.score ?? '-', color: (ep.documentationScore?.score ?? 0) >= 50 ? 'text-green-600' : 'text-red-600' },
+                        ].map(m => (
+                          <div key={m.label} className="bg-white dark:bg-gray-800 rounded p-1">
+                            <div className={`text-sm font-bold ${m.color}`}>{m.value}</div>
+                            <div className="text-[8px] text-gray-400">{m.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-4 text-gray-400 text-xs">
+                      리스트에서 엔드포인트를 클릭하여 추가
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {compareEndpoints[0] && compareEndpoints[1] && (
+            <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 text-center">
+              <span className="text-xs text-gray-500">
+                헬스 차이: <span className={`font-bold ${Math.abs((compareEndpoints[0].healthScore?.overall ?? 0) - (compareEndpoints[1].healthScore?.overall ?? 0)) > 20 ? 'text-red-500' : 'text-green-500'}`}>
+                  {Math.abs((compareEndpoints[0].healthScore?.overall ?? 0) - (compareEndpoints[1].healthScore?.overall ?? 0))}점
+                </span>
+              </span>
+            </div>
+          )}
+        </motion.div>
       )}
     </div>
   );
