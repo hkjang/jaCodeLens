@@ -134,6 +134,32 @@ interface ApiEndpoint {
     breakingChangeRisk: boolean;
     dependentEndpoints: string[];
   };
+  // 고급 분석 메타데이터 (Enhanced v3)
+  similarity?: {
+    similarEndpoints: { path: string; method: string; score: number }[];
+    potentialDuplicate: boolean;
+  };
+  mockData?: {
+    responseExample: string;
+    requestExample?: string;
+    generatedAt?: string;
+  };
+  sdkSnippets?: {
+    typescript?: string;
+    python?: string;
+    curl?: string;
+    javascript?: string;
+  };
+  dependencies?: {
+    callsEndpoints: string[];
+    calledByEndpoints: string[];
+    externalApis: string[];
+  };
+  usageHints?: {
+    recommendedHeaders: { name: string; value: string; description: string }[];
+    commonErrors: { code: number; message: string; solution: string }[];
+    bestPractices: string[];
+  };
 }
 
 interface ApiGroup {
@@ -3415,6 +3441,18 @@ export async function GET(
         versioningStyles: {} as Record<string, number>,
         errorHandling: { consistent: 0, inconsistent: 0, unknown: 0 },
       },
+      // 유사도 및 중복 통계 (NEW v3)
+      similarity: {
+        potentialDuplicates: 0,
+        similarPairs: [] as { endpoint1: string; endpoint2: string; score: number }[],
+      },
+      // 의존성 통계 (NEW v3)
+      dependencies: {
+        totalInternalCalls: 0,
+        totalExternalCalls: 0,
+        externalApis: [] as string[],
+        mostConnected: [] as { path: string; method: string; connections: number }[],
+      },
       // 분석 시간
       analysisTimeMs: 0,
     };
@@ -3564,6 +3602,53 @@ export async function GET(
         method: ep.method,
         score: ep.healthScore?.overall || 0,
       }));
+    
+    // v3 통계: 유사도 및 중복
+    const allSimilarPairs: { endpoint1: string; endpoint2: string; score: number }[] = [];
+    for (const ep of endpoints) {
+      if (ep.similarity) {
+        if (ep.similarity.potentialDuplicate) {
+          stats.similarity.potentialDuplicates++;
+        }
+        for (const sim of ep.similarity.similarEndpoints) {
+          const pair1 = `${ep.method} ${ep.path}`;
+          const pair2 = `${sim.method} ${sim.path}`;
+          // 중복 방지
+          if (!allSimilarPairs.some(p => 
+            (p.endpoint1 === pair1 && p.endpoint2 === pair2) ||
+            (p.endpoint1 === pair2 && p.endpoint2 === pair1)
+          )) {
+            allSimilarPairs.push({ endpoint1: pair1, endpoint2: pair2, score: sim.score });
+          }
+        }
+      }
+    }
+    stats.similarity.similarPairs = allSimilarPairs
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+    
+    // v3 통계: 의존성
+    const externalApisSet = new Set<string>();
+    for (const ep of endpoints) {
+      if (ep.dependencies) {
+        stats.dependencies.totalInternalCalls += ep.dependencies.callsEndpoints.length;
+        stats.dependencies.totalExternalCalls += ep.dependencies.externalApis.length;
+        ep.dependencies.externalApis.forEach(api => externalApisSet.add(api));
+      }
+    }
+    stats.dependencies.externalApis = Array.from(externalApisSet).slice(0, 20);
+    
+    // 가장 많이 연결된 엔드포인트
+    stats.dependencies.mostConnected = endpoints
+      .filter(ep => ep.dependencies)
+      .map(ep => ({
+        path: ep.path,
+        method: ep.method,
+        connections: (ep.dependencies?.callsEndpoints.length || 0) + 
+                     (ep.dependencies?.calledByEndpoints.length || 0),
+      }))
+      .sort((a, b) => b.connections - a.connections)
+      .slice(0, 5);
     
     stats.analysisTimeMs = Date.now() - startTime;
     
@@ -4342,4 +4427,461 @@ function parsePhoenixRoutes(projectPath: string): ApiEndpoint[] {
   scanDir(join(projectPath, 'lib'));
   scanDir(projectPath);
   return endpoints;
+}
+
+// ===== 고급 분석 함수들 (v3) =====
+
+// 유사 엔드포인트 감지
+function detectSimilarEndpoints(endpoint: Partial<ApiEndpoint>, allEndpoints: Partial<ApiEndpoint>[]): ApiEndpoint['similarity'] {
+  const path = endpoint.path || '';
+  const method = endpoint.method || 'GET';
+  const similarEndpoints: { path: string; method: string; score: number }[] = [];
+  
+  // 경로 토큰화
+  const pathTokens = path
+    .split('/')
+    .filter(p => p && !p.startsWith(':') && !p.startsWith('{'))
+    .map(p => p.toLowerCase());
+  
+  for (const other of allEndpoints) {
+    if (other === endpoint) continue;
+    
+    const otherPath = other.path || '';
+    const otherMethod = other.method || 'GET';
+    const otherTokens = otherPath
+      .split('/')
+      .filter(p => p && !p.startsWith(':') && !p.startsWith('{'))
+      .map(p => p.toLowerCase());
+    
+    // Jaccard 유사도 계산
+    const intersection = pathTokens.filter(t => otherTokens.includes(t)).length;
+    const union = new Set([...pathTokens, ...otherTokens]).size;
+    const pathSimilarity = union > 0 ? intersection / union : 0;
+    
+    // 메서드 유사도
+    const methodSimilarity = method === otherMethod ? 0.3 : 0;
+    
+    // 파라미터 유사도
+    const paramCount = endpoint.parameters?.length || 0;
+    const otherParamCount = other.parameters?.length || 0;
+    const paramSimilarity = Math.min(paramCount, otherParamCount) / Math.max(paramCount, otherParamCount, 1) * 0.2;
+    
+    const totalScore = Math.round((pathSimilarity * 0.5 + methodSimilarity + paramSimilarity) * 100);
+    
+    if (totalScore >= 50) {
+      similarEndpoints.push({
+        path: otherPath,
+        method: otherMethod,
+        score: totalScore,
+      });
+    }
+  }
+  
+  // 상위 3개만 반환, 점수 순 정렬
+  similarEndpoints.sort((a, b) => b.score - a.score);
+  const topSimilar = similarEndpoints.slice(0, 3);
+  
+  return {
+    similarEndpoints: topSimilar,
+    potentialDuplicate: topSimilar.length > 0 && topSimilar[0].score >= 80,
+  };
+}
+
+// Mock 데이터 생성
+function generateMockData(endpoint: Partial<ApiEndpoint>): ApiEndpoint['mockData'] {
+  const method = endpoint.method || 'GET';
+  const path = endpoint.path || '';
+  
+  // 리소스 이름 추출
+  const pathParts = path.split('/').filter(p => p && !p.startsWith(':') && !p.startsWith('{'));
+  const resourceName = pathParts[pathParts.length - 1]?.replace(/s$/, '') || 'item';
+  
+  // Request example
+  let requestExample: string | undefined;
+  if (endpoint.requestBody && ['POST', 'PUT', 'PATCH'].includes(method)) {
+    const requestFields: Record<string, unknown> = {};
+    if (endpoint.parameters) {
+      for (const p of endpoint.parameters) {
+        if (p.in === 'body') {
+          requestFields[p.name] = getMockValue(p.type, p.name);
+        }
+      }
+    }
+    if (Object.keys(requestFields).length === 0) {
+      requestFields.name = `New ${resourceName}`;
+      requestFields.description = `Description for ${resourceName}`;
+    }
+    requestExample = JSON.stringify(requestFields, null, 2);
+  }
+  
+  // Response example
+  const responseFields: Record<string, unknown> = {
+    id: '550e8400-e29b-41d4-a716-446655440000',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  
+  if (endpoint.responses && endpoint.responses.length > 0) {
+    const successResponse = endpoint.responses.find(r => r.statusCode === 200 || r.statusCode === 201);
+    if (successResponse?.schema) {
+      responseFields['_type'] = successResponse.schema;
+    }
+  }
+  
+  // 리소스 기반 필드 추가
+  switch (resourceName.toLowerCase()) {
+    case 'user':
+      Object.assign(responseFields, { name: 'John Doe', email: 'john@example.com', role: 'user' });
+      break;
+    case 'product':
+      Object.assign(responseFields, { name: 'Sample Product', price: 99.99, stock: 100 });
+      break;
+    case 'order':
+      Object.assign(responseFields, { status: 'pending', total: 199.99, items: [] });
+      break;
+    case 'post':
+      Object.assign(responseFields, { title: 'Sample Post', content: 'Lorem ipsum...', author: 'John Doe' });
+      break;
+    default:
+      Object.assign(responseFields, { name: `Sample ${resourceName}`, description: `A sample ${resourceName}` });
+  }
+  
+  // 목록 엔드포인트인 경우
+  const isListEndpoint = method === 'GET' && !path.includes(':id') && !path.includes('{id}');
+  let responseExample: string;
+  
+  if (isListEndpoint) {
+    responseExample = JSON.stringify({
+      data: [responseFields],
+      pagination: {
+        page: 1,
+        limit: 10,
+        total: 100,
+        totalPages: 10,
+      },
+    }, null, 2);
+  } else {
+    responseExample = JSON.stringify({
+      success: true,
+      data: responseFields,
+    }, null, 2);
+  }
+  
+  return {
+    responseExample,
+    requestExample,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+// 타입에 따른 Mock 값 생성
+function getMockValue(type: string, name: string): unknown {
+  const lowerType = type.toLowerCase();
+  const lowerName = name.toLowerCase();
+  
+  // 이름 기반 추론
+  if (lowerName.includes('email')) return 'user@example.com';
+  if (lowerName.includes('name')) return 'John Doe';
+  if (lowerName.includes('phone')) return '+1-555-123-4567';
+  if (lowerName.includes('url') || lowerName.includes('link')) return 'https://example.com';
+  if (lowerName.includes('date')) return new Date().toISOString();
+  if (lowerName.includes('id')) return '550e8400-e29b-41d4-a716-446655440000';
+  if (lowerName.includes('password')) return '********';
+  if (lowerName.includes('price') || lowerName.includes('amount')) return 99.99;
+  if (lowerName.includes('count') || lowerName.includes('quantity')) return 10;
+  if (lowerName.includes('status')) return 'active';
+  if (lowerName.includes('enabled') || lowerName.includes('active')) return true;
+  
+  // 타입 기반
+  switch (lowerType) {
+    case 'string':
+    case 'str':
+      return 'sample_string';
+    case 'number':
+    case 'int':
+    case 'integer':
+    case 'float':
+    case 'double':
+      return 42;
+    case 'boolean':
+    case 'bool':
+      return true;
+    case 'array':
+    case 'list':
+      return [];
+    case 'object':
+    case 'dict':
+      return {};
+    case 'date':
+    case 'datetime':
+      return new Date().toISOString();
+    default:
+      return `<${type}>`;
+  }
+}
+
+// SDK 스니펫 생성
+function generateSDKSnippets(endpoint: Partial<ApiEndpoint>): ApiEndpoint['sdkSnippets'] {
+  const method = endpoint.method || 'GET';
+  const path = endpoint.path || '';
+  const baseUrl = 'https://api.example.com';
+  const fullUrl = `${baseUrl}${path}`;
+  
+  // Path 파라미터 대체
+  const urlWithParams = path.replace(/:(\w+)/g, '${$1}').replace(/\{(\w+)\}/g, '${$1}');
+  
+  // Request body 구성
+  const hasBody = ['POST', 'PUT', 'PATCH'].includes(method) && endpoint.requestBody;
+  const bodyFields: Record<string, unknown> = {};
+  if (hasBody && endpoint.parameters) {
+    for (const p of endpoint.parameters) {
+      if (p.in === 'body') {
+        bodyFields[p.name] = getMockValue(p.type, p.name);
+      }
+    }
+  }
+  const bodyJson = hasBody ? JSON.stringify(bodyFields, null, 2) : '';
+  
+  // Query params
+  const queryParams = endpoint.parameters?.filter(p => p.in === 'query') || [];
+  const queryString = queryParams.length > 0 
+    ? '?' + queryParams.map(p => `${p.name}=value`).join('&')
+    : '';
+  
+  // TypeScript/JavaScript fetch snippet
+  const typescript = `// TypeScript/JavaScript
+const response = await fetch(\`${baseUrl}${urlWithParams}${queryString}\`, {
+  method: '${method}',
+  headers: {
+    'Content-Type': 'application/json',${endpoint.auth ? "\n    'Authorization': 'Bearer YOUR_TOKEN'," : ''}
+  },${hasBody ? `\n  body: JSON.stringify(${bodyJson.split('\n').map((l, i) => i === 0 ? l : '  ' + l).join('\n')}),` : ''}
+});
+
+const data = await response.json();
+console.log(data);`;
+
+  // Python requests snippet
+  const python = `# Python
+import requests
+
+response = requests.${method.toLowerCase()}(
+    f"${baseUrl}${urlWithParams.replace(/\$\{/g, '{')}"${queryString ? `,
+    params={${queryParams.map(p => `"${p.name}": "value"`).join(', ')}}` : ''}${hasBody ? `,
+    json=${bodyJson.split('\n').map((l, i) => i === 0 ? l : '    ' + l).join('\n')}` : ''},
+    headers={
+        "Content-Type": "application/json",${endpoint.auth ? '\n        "Authorization": "Bearer YOUR_TOKEN",' : ''}
+    }
+)
+
+print(response.json())`;
+
+  // cURL snippet
+  const curl = `# cURL
+curl -X ${method} \\
+  '${fullUrl.replace(/:(\\w+)/g, '{$1}')}${queryString}' \\
+  -H 'Content-Type: application/json'${endpoint.auth ? " \\\n  -H 'Authorization: Bearer YOUR_TOKEN'" : ''}${hasBody ? ` \\\n  -d '${JSON.stringify(bodyFields)}'` : ''}`;
+
+  // JavaScript (Node.js with axios)
+  const javascript = `// JavaScript (Node.js with axios)
+const axios = require('axios');
+
+const response = await axios.${method.toLowerCase()}(\`${baseUrl}${urlWithParams}${queryString}\`, ${hasBody ? `${bodyJson}, ` : ''}{
+  headers: {
+    'Content-Type': 'application/json',${endpoint.auth ? "\n    'Authorization': 'Bearer YOUR_TOKEN'," : ''}
+  },
+});
+
+console.log(response.data);`;
+
+  return {
+    typescript,
+    python,
+    curl,
+    javascript,
+  };
+}
+
+// 의존성 분석
+function analyzeDependencies(content: string, startIndex: number, endpoint: Partial<ApiEndpoint>): ApiEndpoint['dependencies'] {
+  const funcContent = content.substring(startIndex, startIndex + 5000);
+  const callsEndpoints: string[] = [];
+  const externalApis: string[] = [];
+  
+  // 내부 API 호출 감지
+  const internalCallPatterns = [
+    /fetch\s*\(\s*['"`]\/api\/([^'"`]+)['"`]/g,
+    /axios\.[a-z]+\s*\(\s*['"`]\/api\/([^'"`]+)['"`]/g,
+    /request\s*\(\s*['"`]\/api\/([^'"`]+)['"`]/g,
+  ];
+  
+  for (const pattern of internalCallPatterns) {
+    const matches = funcContent.matchAll(pattern);
+    for (const m of matches) {
+      const calledPath = `/api/${m[1]}`;
+      if (!callsEndpoints.includes(calledPath)) {
+        callsEndpoints.push(calledPath);
+      }
+    }
+  }
+  
+  // 외부 API 호출 감지
+  const externalUrlPattern = /fetch\s*\(\s*['"`](https?:\/\/[^'"`]+)['"`]/g;
+  const externalMatches = funcContent.matchAll(externalUrlPattern);
+  for (const m of externalMatches) {
+    const url = m[1];
+    if (!url.includes('localhost') && !url.includes('127.0.0.1')) {
+      // 도메인만 추출
+      try {
+        const urlObj = new URL(url);
+        const domain = urlObj.hostname;
+        if (!externalApis.includes(domain)) {
+          externalApis.push(domain);
+        }
+      } catch {
+        externalApis.push(url.slice(0, 50));
+      }
+    }
+  }
+  
+  return {
+    callsEndpoints,
+    calledByEndpoints: [], // 이건 전체 분석 시 채워짐
+    externalApis,
+  };
+}
+
+// 사용 힌트 생성
+function generateUsageHints(endpoint: Partial<ApiEndpoint>): ApiEndpoint['usageHints'] {
+  const method = endpoint.method || 'GET';
+  const path = endpoint.path || '';
+  const recommendedHeaders: { name: string; value: string; description: string }[] = [];
+  const commonErrors: { code: number; message: string; solution: string }[] = [];
+  const bestPractices: string[] = [];
+  
+  // 권장 헤더
+  recommendedHeaders.push({
+    name: 'Content-Type',
+    value: 'application/json',
+    description: 'API는 JSON 형식 응답을 반환합니다',
+  });
+  
+  if (endpoint.auth && endpoint.auth !== 'none') {
+    switch (endpoint.auth) {
+      case 'bearer':
+      case 'jwt':
+        recommendedHeaders.push({
+          name: 'Authorization',
+          value: 'Bearer <your_token>',
+          description: 'JWT 토큰을 통한 인증이 필요합니다',
+        });
+        break;
+      case 'apikey':
+        recommendedHeaders.push({
+          name: 'X-API-Key',
+          value: '<your_api_key>',
+          description: 'API 키를 통한 인증이 필요합니다',
+        });
+        break;
+    }
+  }
+  
+  // 일반적인 에러
+  if (endpoint.auth && endpoint.auth !== 'none') {
+    commonErrors.push({
+      code: 401,
+      message: 'Unauthorized',
+      solution: '유효한 인증 토큰/키를 헤더에 포함하세요',
+    });
+    commonErrors.push({
+      code: 403,
+      message: 'Forbidden',
+      solution: '해당 리소스에 대한 권한이 있는지 확인하세요',
+    });
+  }
+  
+  if (['POST', 'PUT', 'PATCH'].includes(method)) {
+    commonErrors.push({
+      code: 400,
+      message: 'Bad Request',
+      solution: '요청 본문의 형식과 필수 필드를 확인하세요',
+    });
+    commonErrors.push({
+      code: 422,
+      message: 'Unprocessable Entity',
+      solution: '입력 데이터의 유효성을 확인하세요',
+    });
+  }
+  
+  if (path.includes(':id') || path.includes('{id}')) {
+    commonErrors.push({
+      code: 404,
+      message: 'Not Found',
+      solution: '해당 ID의 리소스가 존재하는지 확인하세요',
+    });
+  }
+  
+  // 베스트 프랙티스
+  if (method === 'GET') {
+    bestPractices.push('캐시 헤더를 활용하여 성능을 최적화하세요');
+    if (endpoint.performance?.hasPagination) {
+      bestPractices.push('페이지네이션을 사용하여 대량 데이터를 효율적으로 처리하세요');
+    }
+  }
+  
+  if (['POST', 'PUT', 'PATCH'].includes(method)) {
+    bestPractices.push('요청 전 데이터 유효성을 클라이언트에서 먼저 검증하세요');
+    bestPractices.push('네트워크 오류에 대비하여 적절한 재시도 로직을 구현하세요');
+  }
+  
+  if (endpoint.rateLimit) {
+    bestPractices.push(`Rate limit: ${endpoint.rateLimit.limit}회/${endpoint.rateLimit.window} - 호출 빈도를 조절하세요`);
+  }
+  
+  if (endpoint.deprecated) {
+    bestPractices.push('⚠️ 이 엔드포인트는 더 이상 사용되지 않습니다. 새 버전을 사용하세요');
+  }
+  
+  return {
+    recommendedHeaders,
+    commonErrors,
+    bestPractices,
+  };
+}
+
+// 전체 의존성 그래프 구성
+function buildDependencyGraph(endpoints: ApiEndpoint[]): void {
+  // 각 엔드포인트가 호출하는 다른 엔드포인트들을 분석 후, calledByEndpoints 업데이트
+  for (const ep of endpoints) {
+    if (ep.dependencies?.callsEndpoints) {
+      for (const calledPath of ep.dependencies.callsEndpoints) {
+        // calledPath와 일치하는 엔드포인트 찾기
+        const calledEndpoint = endpoints.find(e => 
+          e.path === calledPath || 
+          e.path.replace(/:\w+/g, '*') === calledPath.replace(/:\w+/g, '*')
+        );
+        if (calledEndpoint && calledEndpoint.dependencies) {
+          if (!calledEndpoint.dependencies.calledByEndpoints.includes(`${ep.method} ${ep.path}`)) {
+            calledEndpoint.dependencies.calledByEndpoints.push(`${ep.method} ${ep.path}`);
+          }
+        }
+      }
+    }
+  }
+}
+
+// 엔드포인트에 고급 분석 추가 (v3)
+function enrichEndpointWithAdvancedAnalysis(
+  endpoint: ApiEndpoint,
+  content: string,
+  startIndex: number,
+  allEndpoints: ApiEndpoint[]
+): ApiEndpoint {
+  endpoint.similarity = detectSimilarEndpoints(endpoint, allEndpoints);
+  endpoint.mockData = generateMockData(endpoint);
+  endpoint.sdkSnippets = generateSDKSnippets(endpoint);
+  endpoint.dependencies = analyzeDependencies(content, startIndex, endpoint);
+  endpoint.usageHints = generateUsageHints(endpoint);
+  endpoint.changeRisk = analyzeChangeRisk(endpoint, allEndpoints);
+  
+  return endpoint;
 }
