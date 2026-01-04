@@ -265,17 +265,27 @@ export class PipelineExecutionService {
               walk(fullPath, relativePath);
             } else if (entry.isFile()) {
               const ext = path.extname(entry.name).toLowerCase().slice(1);
-              // API 엔드포인트 맵과 동일한 확장자 지원
+              // API 엔드포인트 맵 및 코드 요소 스캔과 동일한 확장자 지원
               const supportedExts = [
                 'ts', 'tsx', 'js', 'jsx', 'mjs', 'mts',  // TypeScript/JavaScript
-                'java', 'kt', 'scala',                   // JVM 언어
+                'java', 'kt', 'scala', 'groovy',         // JVM 언어
                 'py',                                     // Python
                 'go',                                     // Go
                 'rs',                                     // Rust
                 'php',                                    // PHP
-                'rb',                                     // Ruby
-                'cs',                                     // C#
-                'vue',                                    // Vue.js
+                'rb', 'rake',                             // Ruby
+                'cs', 'fs',                               // C#/F#
+                'swift',                                  // Swift
+                'c', 'h', 'cpp', 'hpp', 'cc', 'cxx',      // C/C++
+                'dart',                                   // Dart/Flutter
+                'vue', 'svelte',                          // Vue/Svelte
+                'lua',                                    // Lua
+                'r',                                      // R
+                'pl', 'pm',                               // Perl
+                'ex', 'exs',                              // Elixir
+                'clj', 'cljs',                            // Clojure
+                'hs',                                     // Haskell
+                'erl', 'hrl',                             // Erlang
               ];
               
               if (supportedExts.includes(ext)) {

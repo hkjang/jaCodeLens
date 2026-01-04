@@ -168,8 +168,28 @@ export async function POST(
 // 파일 수집
 async function collectFiles(basePath: string): Promise<{ path: string; relativePath: string }[]> {
   const files: { path: string; relativePath: string }[] = [];
-  const excludeDirs = ['node_modules', '.git', '.next', 'dist', 'build', '__pycache__', '.venv', 'target', 'out', '.idea', 'vendor'];
-  const includeExts = ['.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.kt', '.go', '.rs', '.vue', '.php', '.rb', '.cs', '.scala'];
+  const excludeDirs = ['node_modules', '.git', '.next', 'dist', 'build', '__pycache__', '.venv', 'target', 'out', '.idea', 'vendor', 'Pods', 'DerivedData', 'bin', 'obj', '.dart_tool', 'packages'];
+  const includeExts = [
+    '.ts', '.tsx', '.js', '.jsx', '.mjs', '.mts',  // TypeScript/JavaScript
+    '.py',                                          // Python
+    '.java', '.kt', '.scala', '.groovy',            // JVM 언어
+    '.go',                                          // Go
+    '.rs',                                          // Rust
+    '.php',                                         // PHP  
+    '.rb', '.rake',                                 // Ruby
+    '.cs', '.fs',                                   // C#/F#
+    '.swift',                                       // Swift
+    '.c', '.h', '.cpp', '.hpp', '.cc', '.cxx',      // C/C++
+    '.dart',                                        // Dart/Flutter
+    '.vue', '.svelte',                              // Vue/Svelte
+    '.lua',                                         // Lua
+    '.r', '.R',                                     // R
+    '.pl', '.pm',                                   // Perl
+    '.ex', '.exs',                                  // Elixir
+    '.clj', '.cljs',                                // Clojure
+    '.hs',                                          // Haskell
+    '.erl', '.hrl',                                 // Erlang
+  ];
 
   async function walk(dir: string) {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -202,14 +222,37 @@ function extractElements(fullPath: string, relativePath: string, content: string
   const ext = path.extname(fullPath).toLowerCase();
   const fileName = path.basename(fullPath);
   
-  // 언어 감지
+  // 언어 감지 (확장)
   let language = 'unknown';
-  if (['.ts', '.tsx'].includes(ext)) language = 'TypeScript';
-  else if (['.js', '.jsx'].includes(ext)) language = 'JavaScript';
-  else if (ext === '.py') language = 'Python';
-  else if (ext === '.java') language = 'Java';
-  else if (ext === '.go') language = 'Go';
-  else if (ext === '.vue') language = 'Vue';
+  const langMap: Record<string, string> = {
+    '.ts': 'TypeScript', '.tsx': 'TypeScript', '.mts': 'TypeScript',
+    '.js': 'JavaScript', '.jsx': 'JavaScript', '.mjs': 'JavaScript',
+    '.py': 'Python',
+    '.java': 'Java',
+    '.kt': 'Kotlin',
+    '.scala': 'Scala',
+    '.groovy': 'Groovy',
+    '.go': 'Go',
+    '.rs': 'Rust',
+    '.php': 'PHP',
+    '.rb': 'Ruby', '.rake': 'Ruby',
+    '.cs': 'C#',
+    '.fs': 'F#',
+    '.swift': 'Swift',
+    '.c': 'C', '.h': 'C',
+    '.cpp': 'C++', '.hpp': 'C++', '.cc': 'C++', '.cxx': 'C++',
+    '.dart': 'Dart',
+    '.vue': 'Vue',
+    '.svelte': 'Svelte',
+    '.lua': 'Lua',
+    '.r': 'R', '.R': 'R',
+    '.pl': 'Perl', '.pm': 'Perl',
+    '.ex': 'Elixir', '.exs': 'Elixir',
+    '.clj': 'Clojure', '.cljs': 'Clojure',
+    '.hs': 'Haskell',
+    '.erl': 'Erlang', '.hrl': 'Erlang',
+  };
+  language = langMap[ext] || 'unknown';
 
   const lines = content.split('\n');
 
@@ -604,7 +647,310 @@ function extractElements(fullPath: string, relativePath: string, content: string
     }
   }
 
+  // Swift 패턴
+  if (language === 'Swift') {
+    const classPattern = /^(?:@\w+\s+)*(?:public\s+|private\s+|internal\s+|open\s+)?(?:final\s+)?(?:class|struct|enum|actor|protocol)\s+(\w+)/;
+    const funcPattern = /^(?:@\w+\s+)*(?:public\s+|private\s+|internal\s+)?(?:static\s+)?(?:override\s+)?func\s+(\w+)\s*\(/;
+
+    let currentClass: string | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      const classMatch = line.match(classPattern);
+      if (classMatch) {
+        const name = classMatch[1];
+        currentClass = name;
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath, fileName, language,
+          elementType: line.includes('protocol') ? 'PROTOCOL' : line.includes('struct') ? 'STRUCT' : 'CLASS',
+          name, lineStart: i + 1, lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 50)).join('\n'),
+          isAsync: false, isExported: !line.includes('private'),
+        });
+        continue;
+      }
+
+      const funcMatch = line.match(funcPattern);
+      if (funcMatch) {
+        const name = funcMatch[1];
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath, fileName, language,
+          elementType: currentClass ? 'METHOD' : 'FUNCTION',
+          name, parentName: currentClass || undefined,
+          lineStart: i + 1, lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 30)).join('\n'),
+          isAsync: line.includes('async'), isExported: !line.includes('private'),
+          signature: line.slice(0, 100),
+        });
+      }
+    }
+  }
+
+  // Rust 패턴
+  if (language === 'Rust') {
+    const structPattern = /^(?:pub\s+)?(?:struct|enum|trait)\s+(\w+)/;
+    const fnPattern = /^(?:pub\s+)?(?:async\s+)?fn\s+(\w+)\s*[<(]/;
+    const implPattern = /^impl(?:<[^>]+>)?\s+(?:(\w+)\s+for\s+)?(\w+)/;
+
+    let currentImpl: string | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      const implMatch = line.match(implPattern);
+      if (implMatch) {
+        currentImpl = implMatch[2];
+        continue;
+      }
+
+      const structMatch = line.match(structPattern);
+      if (structMatch) {
+        const name = structMatch[1];
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath, fileName, language,
+          elementType: line.includes('trait') ? 'TRAIT' : line.includes('enum') ? 'ENUM' : 'STRUCT',
+          name, lineStart: i + 1, lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 50)).join('\n'),
+          isAsync: false, isExported: line.includes('pub'),
+        });
+        continue;
+      }
+
+      const fnMatch = line.match(fnPattern);
+      if (fnMatch) {
+        const name = fnMatch[1];
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath, fileName, language,
+          elementType: currentImpl ? 'METHOD' : 'FUNCTION',
+          name, parentName: currentImpl || undefined,
+          lineStart: i + 1, lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 30)).join('\n'),
+          isAsync: line.includes('async'), isExported: line.includes('pub'),
+          signature: line.slice(0, 100),
+        });
+      }
+    }
+  }
+
+  // PHP 패턴
+  if (language === 'PHP') {
+    const classPattern = /^(?:abstract\s+|final\s+)?class\s+(\w+)/;
+    const funcPattern = /^(?:public|private|protected)?\s*(?:static\s+)?function\s+(\w+)\s*\(/;
+    const interfacePattern = /^interface\s+(\w+)/;
+
+    let currentClass: string | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      const classMatch = line.match(classPattern);
+      if (classMatch) {
+        const name = classMatch[1];
+        currentClass = name;
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath, fileName, language,
+          elementType: 'CLASS', name, lineStart: i + 1, lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 50)).join('\n'),
+          isAsync: false, isExported: true,
+        });
+        continue;
+      }
+
+      const interfaceMatch = line.match(interfacePattern);
+      if (interfaceMatch) {
+        const name = interfaceMatch[1];
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath, fileName, language,
+          elementType: 'INTERFACE', name, lineStart: i + 1, lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 30)).join('\n'),
+          isAsync: false, isExported: true,
+        });
+        continue;
+      }
+
+      const funcMatch = line.match(funcPattern);
+      if (funcMatch) {
+        const name = funcMatch[1];
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath, fileName, language,
+          elementType: currentClass ? 'METHOD' : 'FUNCTION',
+          name, parentName: currentClass || undefined,
+          lineStart: i + 1, lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 30)).join('\n'),
+          isAsync: false, isExported: line.includes('public'),
+          signature: line.slice(0, 100),
+        });
+      }
+    }
+  }
+
+  // Ruby 패턴
+  if (language === 'Ruby') {
+    const classPattern = /^class\s+(\w+)/;
+    const modulePattern = /^module\s+(\w+)/;
+    const defPattern = /^def\s+(?:self\.)?(\w+[?!=]?)/;
+
+    let currentClass: string | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      const classMatch = line.match(classPattern);
+      if (classMatch) {
+        const name = classMatch[1];
+        currentClass = name;
+        const endLine = findRubyBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath, fileName, language,
+          elementType: 'CLASS', name, lineStart: i + 1, lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 50)).join('\n'),
+          isAsync: false, isExported: true,
+        });
+        continue;
+      }
+
+      const moduleMatch = line.match(modulePattern);
+      if (moduleMatch) {
+        const name = moduleMatch[1];
+        const endLine = findRubyBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath, fileName, language,
+          elementType: 'MODULE', name, lineStart: i + 1, lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 50)).join('\n'),
+          isAsync: false, isExported: true,
+        });
+        continue;
+      }
+
+      const defMatch = line.match(defPattern);
+      if (defMatch) {
+        const name = defMatch[1];
+        const endLine = findRubyBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath, fileName, language,
+          elementType: currentClass ? 'METHOD' : 'FUNCTION',
+          name, parentName: currentClass || undefined,
+          lineStart: i + 1, lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 20)).join('\n'),
+          isAsync: false, isExported: true,
+          signature: line.slice(0, 100),
+        });
+      }
+    }
+  }
+
+  // C# 패턴
+  if (language === 'C#') {
+    const classPattern = /^(?:public\s+|private\s+|internal\s+)?(?:partial\s+)?(?:abstract\s+|sealed\s+)?(?:static\s+)?(?:class|interface|struct|record)\s+(\w+)/;
+    const methodPattern = /^(?:public|private|protected|internal)\s+(?:static\s+)?(?:async\s+)?(?:virtual\s+|override\s+)?[\w<>\[\],\s]+\s+(\w+)\s*\(/;
+
+    let currentClass: string | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      const classMatch = line.match(classPattern);
+      if (classMatch) {
+        const name = classMatch[1];
+        currentClass = name;
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath, fileName, language,
+          elementType: line.includes('interface') ? 'INTERFACE' : 'CLASS',
+          name, lineStart: i + 1, lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 50)).join('\n'),
+          isAsync: false, isExported: line.includes('public'),
+        });
+        continue;
+      }
+
+      const methodMatch = line.match(methodPattern);
+      if (methodMatch && currentClass) {
+        const name = methodMatch[1];
+        if (!['if', 'for', 'while', 'switch', 'catch', 'get', 'set'].includes(name)) {
+          const endLine = findBlockEnd(lines, i);
+          elements.push({
+            filePath: relativePath, fileName, language,
+            elementType: 'METHOD', name, parentName: currentClass,
+            lineStart: i + 1, lineEnd: endLine + 1,
+            content: lines.slice(i, Math.min(endLine + 1, i + 30)).join('\n'),
+            isAsync: line.includes('async'), isExported: line.includes('public'),
+            signature: line.slice(0, 120),
+          });
+        }
+      }
+    }
+  }
+
+  // Dart/Flutter 패턴
+  if (language === 'Dart') {
+    const classPattern = /^(?:abstract\s+)?class\s+(\w+)/;
+    const funcPattern = /^(?:Future|void|String|int|bool|double|List|Map|dynamic|\w+)\s+(\w+)\s*\(/;
+
+    let currentClass: string | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      const classMatch = line.match(classPattern);
+      if (classMatch) {
+        const name = classMatch[1];
+        currentClass = name;
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath, fileName, language,
+          elementType: 'CLASS', name, lineStart: i + 1, lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 50)).join('\n'),
+          isAsync: false, isExported: !name.startsWith('_'),
+        });
+        continue;
+      }
+
+      const funcMatch = line.match(funcPattern);
+      if (funcMatch) {
+        const name = funcMatch[1];
+        if (!['if', 'for', 'while', 'switch', 'catch'].includes(name)) {
+          const endLine = findBlockEnd(lines, i);
+          elements.push({
+            filePath: relativePath, fileName, language,
+            elementType: currentClass ? 'METHOD' : 'FUNCTION',
+            name, parentName: currentClass || undefined,
+            lineStart: i + 1, lineEnd: endLine + 1,
+            content: lines.slice(i, Math.min(endLine + 1, i + 30)).join('\n'),
+            isAsync: line.includes('async') || line.includes('Future'),
+            isExported: !name.startsWith('_'),
+            signature: line.slice(0, 100),
+          });
+        }
+      }
+    }
+  }
+
   return elements;
+}
+
+// Ruby 블록 끝 찾기 (end 키워드 기반)
+function findRubyBlockEnd(lines: string[], startLine: number): number {
+  let depth = 0;
+  for (let i = startLine; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (/^(class|module|def|if|unless|case|while|until|for|begin|do)\b/.test(line)) {
+      depth++;
+    }
+    if (line === 'end' || line.startsWith('end ')) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return Math.min(startLine + 50, lines.length - 1);
 }
 
 // 블록 끝 찾기 (중괄호 기반)
