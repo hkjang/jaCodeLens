@@ -72,14 +72,44 @@ export async function POST(request: Request) {
       );
     }
 
-    // Detect project type from path
+    // Detect project type from path and package.json
     let detectedType = type || 'UNKNOWN';
+    
+    // Path-based detection first
     if (path.includes('nextjs') || path.includes('next')) {
       detectedType = 'NEXTJS';
     } else if (path.includes('java') || path.endsWith('.java')) {
       detectedType = 'JAVA';
     } else if (path.includes('python') || path.includes('.py')) {
       detectedType = 'PYTHON';
+    } else {
+      // Try to detect from package.json if available
+      try {
+        const fs = await import('fs/promises');
+        const pkgPath = `${path}/package.json`;
+        const pkgContent = await fs.readFile(pkgPath, 'utf-8');
+        const pkg = JSON.parse(pkgContent);
+        const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+        
+        if (deps['next']) {
+          detectedType = 'NEXTJS';
+        } else if (deps['react']) {
+          detectedType = 'REACT';
+        } else if (deps['vue']) {
+          detectedType = 'VUE';
+        } else if (deps['@angular/core']) {
+          detectedType = 'ANGULAR';
+        } else if (deps['express'] || deps['fastify']) {
+          detectedType = 'NODE';
+        } else {
+          detectedType = 'TYPESCRIPT';
+        }
+      } catch {
+        // package.json not found or not readable, keep detected type
+        if (detectedType === 'UNKNOWN') {
+          detectedType = 'OTHER';
+        }
+      }
     }
 
     const project = await prisma.project.create({

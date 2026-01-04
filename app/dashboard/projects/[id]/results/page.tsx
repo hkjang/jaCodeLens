@@ -20,6 +20,20 @@ interface Issue {
   createdAt: string;
 }
 
+// API 응답 타입
+interface ApiIssue {
+  id: string;
+  severity: string;
+  mainCategory: string;
+  subCategory?: string;
+  message: string;
+  filePath: string;
+  lineStart: number;
+  lineEnd?: number;
+  suggestion?: string;
+  createdAt: string;
+}
+
 interface Stats {
   total: number;
   critical: number;
@@ -65,7 +79,18 @@ export default function ProjectResultsPage() {
       const issuesRes = await fetch(`/api/analysis/issues?projectId=${projectId}`);
       if (issuesRes.ok) {
         const data = await issuesRes.json();
-        setIssues(data.items || []);
+        // API 필드를 UI 필드로 매핑
+        const mappedIssues = (data.issues || []).map((item: ApiIssue) => ({
+          id: item.id,
+          severity: item.severity,
+          category: item.mainCategory,  // mainCategory -> category
+          message: item.message,
+          filePath: item.filePath,
+          lineNumber: item.lineStart,   // lineStart -> lineNumber
+          suggestion: item.suggestion,
+          createdAt: item.createdAt
+        }));
+        setIssues(mappedIssues);
       }
 
       const statsRes = await fetch(`/api/analysis/stats?projectId=${projectId}`);
