@@ -168,8 +168,8 @@ export async function POST(
 // 파일 수집
 async function collectFiles(basePath: string): Promise<{ path: string; relativePath: string }[]> {
   const files: { path: string; relativePath: string }[] = [];
-  const excludeDirs = ['node_modules', '.git', '.next', 'dist', 'build', '__pycache__', '.venv'];
-  const includeExts = ['.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.go', '.rs', '.vue'];
+  const excludeDirs = ['node_modules', '.git', '.next', 'dist', 'build', '__pycache__', '.venv', 'target', 'out', '.idea', 'vendor'];
+  const includeExts = ['.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.kt', '.go', '.rs', '.vue', '.php', '.rb', '.cs', '.scala'];
 
   async function walk(dir: string) {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -382,6 +382,223 @@ function extractElements(fullPath: string, relativePath: string, content: string
           isAsync: line.includes('async'),
           isExported: false,
           signature: line.trim().slice(0, 100),
+        });
+      }
+    }
+  }
+
+  // Java 패턴
+  if (language === 'Java') {
+    // 클래스/인터페이스/Enum
+    const classPattern = /^(?:@\w+(?:\([^)]*\))?\s*)*(?:public\s+|private\s+|protected\s+)?(?:abstract\s+|final\s+)?(?:class|interface|enum)\s+(\w+)/;
+    // 메서드
+    const methodPattern = /^(?:@\w+(?:\([^)]*\))?\s*)*(?:public|private|protected)\s+(?:static\s+)?(?:final\s+)?(?:synchronized\s+)?(?:<[^>]+>\s+)?(\w+(?:<[^>]+>)?)\s+(\w+)\s*\(/;
+    // 생성자
+    const constructorPattern = /^(?:public|private|protected)\s+(\w+)\s*\(/;
+    // 어노테이션 (Spring 등)
+    const annotationPattern = /^@(\w+)(?:\([^)]*\))?/;
+
+    let currentClass: string | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      // 클래스
+      const classMatch = line.match(classPattern);
+      if (classMatch) {
+        const name = classMatch[1];
+        currentClass = name;
+        const endLine = findBlockEnd(lines, i);
+        
+        // 어노테이션 확인
+        const annotations: string[] = [];
+        for (let j = i - 1; j >= 0 && j >= i - 5; j--) {
+          const prevLine = lines[j].trim();
+          const annMatch = prevLine.match(annotationPattern);
+          if (annMatch) {
+            annotations.push('@' + annMatch[1]);
+          } else if (prevLine && !prevLine.startsWith('//') && !prevLine.startsWith('/*')) {
+            break;
+          }
+        }
+        
+        elements.push({
+          filePath: relativePath,
+          fileName,
+          language,
+          elementType: line.includes('interface') ? 'INTERFACE' : line.includes('enum') ? 'ENUM' : 'CLASS',
+          name,
+          lineStart: i + 1,
+          lineEnd: endLine + 1,
+          content: lines.slice(Math.max(0, i - annotations.length), Math.min(endLine + 1, i + 50)).join('\n'),
+          isAsync: false,
+          isExported: line.includes('public'),
+          signature: annotations.join(' ') + ' ' + line.slice(0, 100),
+        });
+        continue;
+      }
+
+      // 메서드
+      const methodMatch = line.match(methodPattern);
+      if (methodMatch && currentClass) {
+        const returnType = methodMatch[1];
+        const name = methodMatch[2];
+        if (!['if', 'for', 'while', 'switch', 'catch'].includes(name)) {
+          const endLine = findBlockEnd(lines, i);
+          
+          // 어노테이션 확인
+          const annotations: string[] = [];
+          for (let j = i - 1; j >= 0 && j >= i - 5; j--) {
+            const prevLine = lines[j].trim();
+            const annMatch = prevLine.match(annotationPattern);
+            if (annMatch) {
+              annotations.push('@' + annMatch[1]);
+            } else if (prevLine && !prevLine.startsWith('//')) {
+              break;
+            }
+          }
+          
+          elements.push({
+            filePath: relativePath,
+            fileName,
+            language,
+            elementType: 'METHOD',
+            name,
+            parentName: currentClass,
+            lineStart: i + 1,
+            lineEnd: endLine + 1,
+            content: lines.slice(i, Math.min(endLine + 1, i + 30)).join('\n'),
+            isAsync: line.includes('CompletableFuture') || line.includes('Mono<') || line.includes('@Async'),
+            isExported: line.includes('public'),
+            signature: annotations.join(' ') + ' ' + line.slice(0, 120),
+          });
+        }
+        continue;
+      }
+
+      // 생성자
+      const constructorMatch = line.match(constructorPattern);
+      if (constructorMatch && currentClass && constructorMatch[1] === currentClass) {
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath,
+          fileName,
+          language,
+          elementType: 'CONSTRUCTOR',
+          name: currentClass,
+          parentName: currentClass,
+          lineStart: i + 1,
+          lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 20)).join('\n'),
+          isAsync: false,
+          isExported: line.includes('public'),
+          signature: line.slice(0, 100),
+        });
+      }
+    }
+  }
+
+  // Kotlin 패턴
+  if (ext === '.kt') {
+    const classPattern = /^(?:@\w+(?:\([^)]*\))?\s*)*(?:open\s+|abstract\s+|sealed\s+|data\s+)?(?:class|interface|object|enum class)\s+(\w+)/;
+    const funPattern = /^(?:@\w+(?:\([^)]*\))?\s*)*(?:override\s+)?(?:suspend\s+)?(?:fun|private fun|internal fun)\s+(?:<[^>]+>\s+)?(\w+)\s*\(/;
+
+    let currentClass: string | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      const classMatch = line.match(classPattern);
+      if (classMatch) {
+        const name = classMatch[1];
+        currentClass = name;
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath,
+          fileName,
+          language: 'Kotlin',
+          elementType: line.includes('interface') ? 'INTERFACE' : line.includes('object') ? 'OBJECT' : 'CLASS',
+          name,
+          lineStart: i + 1,
+          lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 50)).join('\n'),
+          isAsync: false,
+          isExported: !line.includes('private') && !line.includes('internal'),
+        });
+        continue;
+      }
+
+      const funMatch = line.match(funPattern);
+      if (funMatch) {
+        const name = funMatch[1];
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath,
+          fileName,
+          language: 'Kotlin',
+          elementType: currentClass ? 'METHOD' : 'FUNCTION',
+          name,
+          parentName: currentClass || undefined,
+          lineStart: i + 1,
+          lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 30)).join('\n'),
+          isAsync: line.includes('suspend'),
+          isExported: !line.includes('private'),
+          signature: line.slice(0, 100),
+        });
+      }
+    }
+  }
+
+  // Go 패턴
+  if (language === 'Go') {
+    const funcPattern = /^func\s+(?:\((\w+)\s+\*?(\w+)\)\s+)?(\w+)\s*\(/;
+    const typePattern = /^type\s+(\w+)\s+(struct|interface)/;
+
+    let currentStruct: string | null = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      const typeMatch = line.match(typePattern);
+      if (typeMatch) {
+        const name = typeMatch[1];
+        const kind = typeMatch[2];
+        currentStruct = name;
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath,
+          fileName,
+          language,
+          elementType: kind === 'interface' ? 'INTERFACE' : 'STRUCT',
+          name,
+          lineStart: i + 1,
+          lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 50)).join('\n'),
+          isAsync: false,
+          isExported: name[0] === name[0].toUpperCase(),
+        });
+        continue;
+      }
+
+      const funcMatch = line.match(funcPattern);
+      if (funcMatch) {
+        const receiver = funcMatch[2] || null;
+        const name = funcMatch[3];
+        const endLine = findBlockEnd(lines, i);
+        elements.push({
+          filePath: relativePath,
+          fileName,
+          language,
+          elementType: receiver ? 'METHOD' : 'FUNCTION',
+          name,
+          parentName: receiver || undefined,
+          lineStart: i + 1,
+          lineEnd: endLine + 1,
+          content: lines.slice(i, Math.min(endLine + 1, i + 30)).join('\n'),
+          isAsync: false,
+          isExported: name[0] === name[0].toUpperCase(),
+          signature: line.slice(0, 100),
         });
       }
     }
