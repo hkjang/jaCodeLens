@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, BarChart3, AlertCircle, AlertTriangle, Info, CheckCircle,
   RefreshCw, Download, Search, FileCode, Layers, FolderOpen, List,
-  ChevronDown, ChevronRight, X, ExternalLink, Copy, Eye
+  ChevronDown, ChevronRight, X, ExternalLink, Copy, Eye, ArrowUpDown, Keyboard,
+  ChevronUp, ArrowUp
 } from 'lucide-react';
 
 interface Issue {
@@ -56,27 +57,107 @@ export default function ProjectResultsPage() {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [severityFilter, setSeverityFilter] = useState(initialSeverity);
   const [categoryFilter, setCategoryFilter] = useState(initialCategory);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'grouped'>('list');
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
+  
+  // 페이지네이션 상태
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [currentOffset, setCurrentOffset] = useState(0);
+  const PAGE_SIZE = 50;
+  
+  // 정렬 상태
+  const [sortBy, setSortBy] = useState<'severity' | 'date' | 'file'>('severity');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  
+  // 스크롤 및 키보드 상태
+  const listRef = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(-1);
 
   useEffect(() => {
     loadData();
   }, [projectId]);
 
+  // 무한 스크롤 - IntersectionObserver
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore) {
+          loadMore();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    
+    if (loadMoreRef.current) {
+      observer.observe(loadMoreRef.current);
+    }
+    
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore]);
+
+  // 스크롤 감지 - 맨 위로 버튼 표시
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowScrollTop(window.scrollY > 500);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // 키보드 단축키
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 입력 필드에서는 무시
+      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      
+      switch (e.key) {
+        case 'j': // 다음 이슈
+          setSelectedIndex(prev => Math.min(prev + 1, filteredIssues.length - 1));
+          break;
+        case 'k': // 이전 이슈
+          setSelectedIndex(prev => Math.max(prev - 1, 0));
+          break;
+        case 'Enter': // 선택된 이슈 열기
+          if (selectedIndex >= 0 && issues[selectedIndex]) {
+            setSelectedIssue(issues[selectedIndex]);
+          }
+          break;
+        case 'Escape': // 선택 해제
+          setSelectedIssue(null);
+          setSelectedIndex(-1);
+          break;
+        case 'r': // 새로고침
+          if (!e.ctrlKey && !e.metaKey) loadData();
+          break;
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [issues, selectedIndex]);
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
 
   async function loadData() {
     setLoading(true);
+    setCurrentOffset(0);
     try {
       const projectRes = await fetch(`/api/projects/${projectId}`);
       if (projectRes.ok) {
         setProject(await projectRes.json());
       }
 
-      const issuesRes = await fetch(`/api/analysis/issues?projectId=${projectId}`);
+      const issuesRes = await fetch(`/api/analysis/issues?projectId=${projectId}&limit=${PAGE_SIZE}&offset=0`);
       if (issuesRes.ok) {
         const data = await issuesRes.json();
         // API 필드를 UI 필드로 매핑
@@ -91,6 +172,9 @@ export default function ProjectResultsPage() {
           createdAt: item.createdAt
         }));
         setIssues(mappedIssues);
+        setTotalCount(data.pagination?.total || 0);
+        setHasMore(data.pagination?.hasMore || false);
+        setCurrentOffset(PAGE_SIZE);
       }
 
       const statsRes = await fetch(`/api/analysis/stats?projectId=${projectId}`);
@@ -103,6 +187,64 @@ export default function ProjectResultsPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // 더 보기 기능
+  async function loadMore() {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const issuesRes = await fetch(`/api/analysis/issues?projectId=${projectId}&limit=${PAGE_SIZE}&offset=${currentOffset}`);
+      if (issuesRes.ok) {
+        const data = await issuesRes.json();
+        const mappedIssues = (data.issues || []).map((item: ApiIssue) => ({
+          id: item.id,
+          severity: item.severity,
+          category: item.mainCategory,
+          message: item.message,
+          filePath: item.filePath,
+          lineNumber: item.lineStart,
+          suggestion: item.suggestion,
+          createdAt: item.createdAt
+        }));
+        setIssues(prev => [...prev, ...mappedIssues]);
+        setHasMore(data.pagination?.hasMore || false);
+        setCurrentOffset(prev => prev + PAGE_SIZE);
+      }
+    } catch (e) {
+      console.error('Failed to load more', e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  // CSV 내보내기 기능
+  function exportToCSV() {
+    if (filteredIssues.length === 0) return;
+    
+    const headers = ['심각도', '카테고리', '메시지', '파일 경로', '라인', '제안'];
+    const rows = filteredIssues.map(issue => [
+      issue.severity,
+      issue.category,
+      issue.message.replace(/"/g, '""'),
+      issue.filePath,
+      issue.lineNumber,
+      issue.suggestion?.replace(/"/g, '""') || ''
+    ]);
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+    
+    // BOM for Korean support in Excel
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${project?.name || 'issues'}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   const filteredIssues = useMemo(() => issues.filter(issue => {
@@ -236,8 +378,17 @@ export default function ProjectResultsPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={loadData} className="p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg">
+          <button onClick={loadData} className="p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg" title="새로고침">
             <RefreshCw className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={exportToCSV}
+            disabled={filteredIssues.length === 0}
+            className="flex items-center gap-2 px-3 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg disabled:opacity-50"
+            title="현재 로드된 이슈를 CSV로 내보내기"
+          >
+            <Download className="w-4 h-4" />
+            CSV
           </button>
           <a 
             href={`/api/projects/${projectId}/report?format=html`}
@@ -249,6 +400,31 @@ export default function ProjectResultsPage() {
           </a>
         </div>
       </header>
+
+      {/* 로드 진행률 프로그레스 바 */}
+      {totalCount > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              로드 진행률: {issues.length.toLocaleString()} / {totalCount.toLocaleString()}개
+            </span>
+            <span className="text-sm text-gray-500">
+              {((issues.length / totalCount) * 100).toFixed(1)}%
+            </span>
+          </div>
+          <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full transition-all duration-500"
+              style={{ width: `${(issues.length / totalCount) * 100}%` }}
+            />
+          </div>
+          {hasMore && (
+            <p className="text-xs text-gray-500 mt-2">
+              💡 &quot;더 보기&quot; 버튼을 클릭하거나 스크롤을 내려 더 많은 이슈를 로드할 수 있습니다.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* 통계 카드 - 클릭 필터 */}
       {stats && (
@@ -322,6 +498,27 @@ export default function ProjectResultsPage() {
           />
         </div>
 
+        {/* 정렬 드롭다운 */}
+        <div className="flex items-center gap-2">
+          <ArrowUpDown className="w-4 h-4 text-gray-500" />
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as 'severity' | 'date' | 'file')}
+            className="px-2 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm"
+          >
+            <option value="severity">심각도순</option>
+            <option value="date">날짜순</option>
+            <option value="file">파일순</option>
+          </select>
+          <button
+            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+            title={sortOrder === 'asc' ? '오름차순' : '내림차순'}
+          >
+            {sortOrder === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+        </div>
+
         <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
           <button
             onClick={() => setViewMode('list')}
@@ -339,6 +536,14 @@ export default function ProjectResultsPage() {
           </button>
         </div>
 
+        {/* 키보드 단축키 힌트 */}
+        <button
+          className="p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+          title="단축키: J(다음) K(이전) Enter(열기) Esc(닫기) R(새로고침)"
+        >
+          <Keyboard className="w-4 h-4" />
+        </button>
+
         {(severityFilter || categoryFilter) && (
           <button
             onClick={() => { setSeverityFilter(''); setCategoryFilter(''); }}
@@ -354,9 +559,17 @@ export default function ProjectResultsPage() {
       {viewMode === 'list' && (
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
           <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-            <h2 className="font-semibold text-gray-900 dark:text-white">
-              발견된 이슈 ({filteredIssues.length})
+            <h2 className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              발견된 이슈 
+              <span className="text-sm font-normal text-gray-500">
+                ({filteredIssues.length.toLocaleString()} / {totalCount.toLocaleString()}개)
+              </span>
             </h2>
+            {totalCount > 0 && (
+              <span className="text-xs text-gray-500">
+                {((filteredIssues.length / totalCount) * 100).toFixed(1)}% 로드됨
+              </span>
+            )}
           </div>
           {filteredIssues.length > 0 ? (
             <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
@@ -392,6 +605,29 @@ export default function ProjectResultsPage() {
             <div className="p-12 text-center text-gray-500">
               <CheckCircle className="w-12 h-12 mx-auto mb-4 text-green-500" />
               <p className="text-lg font-medium">이슈가 없습니다!</p>
+            </div>
+          )}
+          
+          {/* 더 보기 버튼 */}
+          {hasMore && (
+            <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+              <button
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="w-full py-3 px-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-500 text-white font-medium rounded-lg transition-all flex items-center justify-center gap-2"
+              >
+                {loadingMore ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    로딩 중...
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-4 h-4" />
+                    더 보기 ({(totalCount - issues.length).toLocaleString()}개 남음)
+                  </>
+                )}
+              </button>
             </div>
           )}
         </div>
@@ -450,6 +686,20 @@ export default function ProjectResultsPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* 무한 스크롤 트리거 */}
+      <div ref={loadMoreRef} className="h-10" />
+
+      {/* 맨 위로 스크롤 버튼 */}
+      {showScrollTop && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-8 right-8 p-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all animate-bounce z-50"
+          title="맨 위로"
+        >
+          <ArrowUp className="w-6 h-6" />
+        </button>
       )}
     </div>
   );
