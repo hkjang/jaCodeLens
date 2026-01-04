@@ -180,6 +180,13 @@ export default function ProjectErdPage() {
   const [showRelationsList, setShowRelationsList] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fieldTypeFilter, setFieldTypeFilter] = useState<string | null>(null);
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const [layoutMode, setLayoutMode] = useState<'grid' | 'hierarchy' | 'circle'>('grid');
+  const [showFieldFilter, setShowFieldFilter] = useState(false);
+  const [fieldFilterType, setFieldFilterType] = useState<'all' | 'pk' | 'fk' | 'required'>('all');
+  const [hoveredRelation, setHoveredRelation] = useState<number | null>(null);
+  const [availableSchemas, setAvailableSchemas] = useState<{path: string; type: string}[]>([]);
+  const [showSchemaSelector, setShowSchemaSelector] = useState(false);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -310,6 +317,9 @@ export default function ProjectErdPage() {
             frameworks: data.frameworks,
             path: data.schemaPath,
           });
+          if (data.availableSchemas) {
+            setAvailableSchemas(data.availableSchemas);
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -343,15 +353,29 @@ export default function ProjectErdPage() {
         model.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         model.fields.some(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesCategory = !selectedCategory || model.category === selectedCategory;
-      return matchesSearch && matchesCategory;
+      const notCollapsed = !collapsedCategories.has(model.category);
+      return matchesSearch && matchesCategory && notCollapsed;
     });
-  }, [erdData, searchQuery, selectedCategory]);
+  }, [erdData, searchQuery, selectedCategory, collapsedCategories]);
 
   const categories = useMemo(() => {
     if (!erdData) return [];
     const cats = [...new Set(erdData.models.map(m => m.category))];
     return cats.sort();
   }, [erdData]);
+
+  // 카테고리 접기/펼치기 토글
+  const toggleCategoryCollapse = useCallback((category: string) => {
+    setCollapsedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      return next;
+    });
+  }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent, modelName?: string) => {
     e.preventDefault();
@@ -872,6 +896,52 @@ export default function ProjectErdPage() {
           >
             <RefreshCw className="w-4 h-4 text-gray-600 dark:text-gray-400" />
           </button>
+          
+          {/* 필드 필터 */}
+          <div className="relative">
+            <button
+              onClick={() => setShowFieldFilter(prev => !prev)}
+              className={`p-2 rounded-lg transition flex items-center gap-1 ${
+                fieldFilterType !== 'all' ? 'bg-green-100 text-green-600' : 
+                showFieldFilter ? 'bg-blue-100 text-blue-600' : 
+                'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'
+              }`}
+              title="필드 필터"
+            >
+              <Filter className="w-4 h-4" />
+            </button>
+            <AnimatePresence>
+              {showFieldFilter && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 z-50 w-40"
+                >
+                  {[
+                    { value: 'all', label: '모든 필드' },
+                    { value: 'pk', label: '기본키만' },
+                    { value: 'fk', label: '외래키만' },
+                    { value: 'required', label: '필수 필드만' },
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => { 
+                        setFieldFilterType(opt.value as typeof fieldFilterType); 
+                        setShowFieldFilter(false); 
+                      }}
+                      className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${
+                        fieldFilterType === opt.value ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600' : ''
+                      }`}
+                    >
+                      {fieldFilterType === opt.value && <Check className="w-3 h-3" />}
+                      {opt.label}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1" />
           <button
             onClick={() => setShowMinimap(prev => !prev)}
@@ -997,23 +1067,32 @@ export default function ProjectErdPage() {
               {categories.map(cat => {
                 const count = erdData?.models.filter(m => m.category === cat).length || 0;
                 const color = categoryColors[cat] || categoryColors['Other'];
+                const isCollapsed = collapsedCategories.has(cat);
                 return (
-                  <button
-                    key={cat}
-                    onClick={() => navigateToCategory(cat === selectedCategory ? null : cat)}
-                    className={`w-full text-left px-3 py-2 text-sm rounded-lg transition flex items-center gap-2 ${
-                      selectedCategory === cat 
-                        ? `${color.lightBg} ${color.textClass} font-medium` 
-                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                    }`}
-                  >
-                    <span 
-                      className="w-3 h-3 rounded-full flex-shrink-0" 
-                      style={{ backgroundColor: color.fill }}
-                    />
-                    <span className="truncate">{cat}</span>
-                    <span className="ml-auto text-xs opacity-60">({count})</span>
-                  </button>
+                  <div key={cat} className="flex items-center gap-1">
+                    <button
+                      onClick={() => navigateToCategory(cat === selectedCategory ? null : cat)}
+                      className={`flex-1 text-left px-3 py-2 text-sm rounded-lg transition flex items-center gap-2 ${
+                        selectedCategory === cat 
+                          ? `${color.lightBg} ${color.textClass} font-medium` 
+                          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                      } ${isCollapsed ? 'opacity-50' : ''}`}
+                    >
+                      <span 
+                        className="w-3 h-3 rounded-full flex-shrink-0" 
+                        style={{ backgroundColor: color.fill }}
+                      />
+                      <span className="truncate">{cat}</span>
+                      <span className="ml-auto text-xs opacity-60">({count})</span>
+                    </button>
+                    <button
+                      onClick={() => toggleCategoryCollapse(cat)}
+                      className="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded transition"
+                      title={isCollapsed ? "펼치기" : "접기"}
+                    >
+                      <ChevronDown className={`w-3 h-3 text-gray-400 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -1104,8 +1183,19 @@ export default function ProjectErdPage() {
                 const color = categoryColors[model.category] || categoryColors['Other'];
                 const isSelected = selectedModel?.name === model.name;
                 const isHovered = hoveredModel === model.name;
-                const displayFields = compactMode ? [] : model.fields.slice(0, 8);
-                const moreCount = compactMode ? model.fields.length : model.fields.length - displayFields.length;
+                
+                // 필드 필터 적용
+                let filteredFields = model.fields;
+                if (fieldFilterType === 'pk') {
+                  filteredFields = model.fields.filter(f => f.isPrimaryKey);
+                } else if (fieldFilterType === 'fk') {
+                  filteredFields = model.fields.filter(f => f.isRelation);
+                } else if (fieldFilterType === 'required') {
+                  filteredFields = model.fields.filter(f => !f.isOptional);
+                }
+                
+                const displayFields = compactMode ? [] : filteredFields.slice(0, 8);
+                const moreCount = compactMode ? filteredFields.length : filteredFields.length - displayFields.length;
                 const boxHeight = compactMode ? 50 : (44 + displayFields.length * 26 + (moreCount > 0 ? 24 : 0));
                 
                 return (
