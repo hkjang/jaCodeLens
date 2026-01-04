@@ -269,22 +269,61 @@ export default function ProjectCodeElementsPage() {
         
         // URL 파라미터로 특정 파일/라인 지정된 경우 자동 선택
         if (targetFile && data.elements) {
+          // 다양한 경로 매칭 전략 (상대/절대 경로 모두 지원)
+          const normalizedTarget = targetFile.replace(/\\/g, '/').toLowerCase();
+          const targetFileName = normalizedTarget.split('/').pop() || '';
+          
           const matchingElement = data.elements.find((el: CodeElement) => {
-            const fileMatch = el.filePath === targetFile || el.filePath.endsWith(targetFile);
-            if (!fileMatch) return false;
+            const normalizedPath = el.filePath.replace(/\\/g, '/').toLowerCase();
+            const fileName = normalizedPath.split('/').pop() || '';
             
-            // 라인 번호도 지정된 경우 해당 범위에 있는 요소 찾기
-            if (targetLine) {
+            // 1. 정확히 일치
+            if (normalizedPath === normalizedTarget) return true;
+            
+            // 2. 끝부분 일치 (상대 경로)
+            if (normalizedPath.endsWith(normalizedTarget)) return true;
+            if (normalizedTarget.endsWith(normalizedPath)) return true;
+            
+            // 3. 파일명만 일치하고 라인 범위도 일치
+            if (fileName === targetFileName && targetLine) {
               const lineNum = parseInt(targetLine);
               return el.lineStart <= lineNum && el.lineEnd >= lineNum;
             }
-            return true;
+            
+            return false;
           });
           
-          if (matchingElement) {
-            setSelectedElement(matchingElement);
+          // 라인 번호로 필터링
+          const bestMatch = matchingElement && targetLine
+            ? data.elements.find((el: CodeElement) => {
+                const normalizedPath = el.filePath.replace(/\\/g, '/').toLowerCase();
+                const normalizedTarget2 = targetFile.replace(/\\/g, '/').toLowerCase();
+                const pathMatch = normalizedPath === normalizedTarget2 || 
+                                  normalizedPath.endsWith(normalizedTarget2) ||
+                                  normalizedTarget2.endsWith(normalizedPath);
+                if (!pathMatch) return false;
+                const lineNum = parseInt(targetLine);
+                return el.lineStart <= lineNum && el.lineEnd >= lineNum;
+              }) || matchingElement
+            : matchingElement;
+          
+          if (bestMatch) {
+            setSelectedElement(bestMatch);
             setShowCodePreview(true);
-            showToast(`${matchingElement.name} (${targetFile}:${targetLine || matchingElement.lineStart}) 위치로 이동했습니다`, 'info');
+            showToast(`${bestMatch.name} (${bestMatch.fileName}:${targetLine || bestMatch.lineStart}) 위치로 이동했습니다`, 'info');
+          } else {
+            // 매칭 실패 시 안내
+            const partialMatches = data.elements.filter((el: CodeElement) => 
+              el.filePath.toLowerCase().includes(targetFileName)
+            ).slice(0, 3);
+            
+            if (partialMatches.length > 0) {
+              showToast(`정확한 코드를 찾지 못했습니다. 비슷한 파일: ${partialMatches.map((e: CodeElement) => e.name).join(', ')}`, 'info');
+              setSelectedElement(partialMatches[0]);
+              setShowCodePreview(true);
+            } else {
+              showToast(`${targetFile}:${targetLine} 위치의 코드 요소를 찾을 수 없습니다. 먼저 프로젝트를 스캔해주세요.`, 'error');
+            }
           }
         }
       }
@@ -1286,12 +1325,20 @@ export default function ProjectCodeElementsPage() {
             </div>
             <pre className={`p-4 text-sm text-gray-300 font-mono overflow-auto ${codePreviewFullscreen ? 'h-[calc(100%-3rem)]' : 'max-h-[500px]'}`}>
               <code>
-                {(selectedElement.content || selectedElement.signature || `// ${selectedElement.elementType}: ${selectedElement.name}`).split('\n').map((line, i) => (
-                  <div key={i} className="flex hover:bg-gray-800/50">
-                    <span className="select-none text-gray-600 text-right w-10 mr-4 flex-shrink-0 border-r border-gray-700 pr-2">{selectedElement.lineStart + i}</span>
-                    <span className="flex-1">{highlightSyntax(line, selectedElement.language)}</span>
-                  </div>
-                ))}
+                {(selectedElement.content || selectedElement.signature || `// ${selectedElement.elementType}: ${selectedElement.name}`).split('\n').map((line, i) => {
+                  const lineNum = selectedElement.lineStart + i;
+                  const isHighlighted = targetLine && parseInt(targetLine) === lineNum;
+                  return (
+                    <div 
+                      key={i} 
+                      className={`flex hover:bg-gray-800/50 ${isHighlighted ? 'bg-yellow-500/30 animate-pulse-once' : ''}`}
+                      id={isHighlighted ? 'highlighted-line' : undefined}
+                    >
+                      <span className={`select-none text-right w-10 mr-4 flex-shrink-0 border-r border-gray-700 pr-2 ${isHighlighted ? 'text-yellow-400 font-bold' : 'text-gray-600'}`}>{lineNum}</span>
+                      <span className="flex-1">{highlightSyntax(line, selectedElement.language)}</span>
+                    </div>
+                  );
+                })}
               </code>
             </pre>
           </div>
@@ -1344,6 +1391,13 @@ export default function ProjectCodeElementsPage() {
               {/* 관련 페이지 링크 */}
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-gray-500">관련:</span>
+                <Link 
+                  href={`/dashboard/projects/${projectId}/results?file=${encodeURIComponent(selectedElement.filePath)}`}
+                  className="text-xs px-2 py-1 bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded hover:bg-red-100 transition-colors flex items-center gap-1"
+                >
+                  <AlertCircle className="w-3 h-3" />
+                  이슈 보기
+                </Link>
                 <Link 
                   href={`/dashboard/projects/${projectId}/results`}
                   className="text-xs px-2 py-1 bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 rounded hover:bg-blue-100 transition-colors flex items-center gap-1"

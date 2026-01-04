@@ -52,6 +52,7 @@ export default function ProjectResultsPage() {
   // URL 쿼리 파라미터로 초기 필터 값 설정
   const initialSeverity = searchParams.get('severity') || '';
   const initialCategory = searchParams.get('category') || '';
+  const initialFile = searchParams.get('file') || '';
 
   const [project, setProject] = useState<{ id: string; name: string; path: string } | null>(null);
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -60,7 +61,7 @@ export default function ProjectResultsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [severityFilter, setSeverityFilter] = useState(initialSeverity);
   const [categoryFilter, setCategoryFilter] = useState(initialCategory);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(initialFile);
   const [viewMode, setViewMode] = useState<'list' | 'grouped'>('list');
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
@@ -417,7 +418,7 @@ export default function ProjectResultsPage() {
                   메시지 복사
                 </button>
                 <Link 
-                  href={`/dashboard/projects/${projectId}/code-elements?file=${encodeURIComponent(selectedIssue.filePath)}`} 
+                  href={`/dashboard/projects/${projectId}/code-elements?file=${encodeURIComponent(selectedIssue.filePath)}&line=${selectedIssue.lineNumber}`} 
                   className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg hover:from-blue-600 hover:to-indigo-700 transition shadow-md"
                 >
                   <ExternalLink className="w-4 h-4" />
