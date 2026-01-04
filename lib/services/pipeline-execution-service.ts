@@ -241,13 +241,22 @@ export class PipelineExecutionService {
             const fullPath = path.join(dir, entry.name);
             const relativePath = base ? path.join(base, entry.name) : entry.name;
             
-            // 제외 패턴
+            // 제외 패턴 - API 엔드포인트 맵과 동일
             if (entry.name === 'node_modules' || 
                 entry.name === '.git' || 
                 entry.name === 'dist' ||
                 entry.name === '.next' ||
                 entry.name === 'build' ||
                 entry.name === 'coverage' ||
+                entry.name === 'target' ||      // Java/Kotlin
+                entry.name === 'out' ||         // Java
+                entry.name === '.idea' ||       // IntelliJ
+                entry.name === 'gradle' ||      // Gradle
+                entry.name === '__pycache__' || // Python
+                entry.name === '.venv' ||       // Python
+                entry.name === 'venv' ||        // Python
+                entry.name === 'vendor' ||      // Go/PHP
+                entry.name === 'WEB-INF' ||     // Java EE
                 entry.name.startsWith('.')) {
               continue;
             }
@@ -256,7 +265,18 @@ export class PipelineExecutionService {
               walk(fullPath, relativePath);
             } else if (entry.isFile()) {
               const ext = path.extname(entry.name).toLowerCase().slice(1);
-              const supportedExts = ['ts', 'tsx', 'js', 'jsx', 'java', 'py', 'go'];
+              // API 엔드포인트 맵과 동일한 확장자 지원
+              const supportedExts = [
+                'ts', 'tsx', 'js', 'jsx', 'mjs', 'mts',  // TypeScript/JavaScript
+                'java', 'kt', 'scala',                   // JVM 언어
+                'py',                                     // Python
+                'go',                                     // Go
+                'rs',                                     // Rust
+                'php',                                    // PHP
+                'rb',                                     // Ruby
+                'cs',                                     // C#
+                'vue',                                    // Vue.js
+              ];
               
               if (supportedExts.includes(ext)) {
                 try {
