@@ -32,9 +32,10 @@ interface ApiGroup {
   subGroups?: ApiGroup[];
 }
 
-// 프레임워크 감지
+// 프레임워크 감지 (확장)
 function detectFramework(projectPath: string): string {
   try {
+    // Node.js/JavaScript/TypeScript
     if (existsSync(join(projectPath, 'package.json'))) {
       const pkg = JSON.parse(readFileSync(join(projectPath, 'package.json'), 'utf-8'));
       const deps = { ...pkg.dependencies, ...pkg.devDependencies };
@@ -44,16 +45,97 @@ function detectFramework(projectPath: string): string {
       if (deps['@nestjs/core']) return 'nestjs';
       if (deps.koa) return 'koa';
       if (deps.hono) return 'hono';
+      if (deps['@trpc/server']) return 'trpc';
+      if (deps['@hapi/hapi']) return 'hapi';
+      if (deps.restify) return 'restify';
     }
+    
+    // Python
     if (existsSync(join(projectPath, 'requirements.txt'))) {
       const req = readFileSync(join(projectPath, 'requirements.txt'), 'utf-8');
       if (req.includes('fastapi')) return 'fastapi';
       if (req.includes('flask')) return 'flask';
       if (req.includes('django')) return 'django';
+      if (req.includes('tornado')) return 'tornado';
+      if (req.includes('aiohttp')) return 'aiohttp';
+      if (req.includes('sanic')) return 'sanic';
     }
-    if (existsSync(join(projectPath, 'pom.xml')) || existsSync(join(projectPath, 'build.gradle'))) {
+    if (existsSync(join(projectPath, 'pyproject.toml'))) {
+      const pyproject = readFileSync(join(projectPath, 'pyproject.toml'), 'utf-8');
+      if (pyproject.includes('fastapi')) return 'fastapi';
+      if (pyproject.includes('django')) return 'django';
+      if (pyproject.includes('flask')) return 'flask';
+    }
+    
+    // Java/Kotlin
+    if (existsSync(join(projectPath, 'pom.xml'))) {
+      const pom = readFileSync(join(projectPath, 'pom.xml'), 'utf-8');
+      if (pom.includes('spring-boot')) return 'spring';
+      if (pom.includes('quarkus')) return 'quarkus';
+      if (pom.includes('micronaut')) return 'micronaut';
+      if (pom.includes('vertx')) return 'vertx';
       return 'spring';
     }
+    if (existsSync(join(projectPath, 'build.gradle')) || existsSync(join(projectPath, 'build.gradle.kts'))) {
+      return 'spring';
+    }
+    
+    // Go
+    if (existsSync(join(projectPath, 'go.mod'))) {
+      const goMod = readFileSync(join(projectPath, 'go.mod'), 'utf-8');
+      if (goMod.includes('gin-gonic')) return 'gin';
+      if (goMod.includes('labstack/echo')) return 'echo';
+      if (goMod.includes('gofiber/fiber')) return 'fiber';
+      if (goMod.includes('gorilla/mux')) return 'gorilla';
+      if (goMod.includes('go-chi/chi')) return 'chi';
+      return 'go-http';
+    }
+    
+    // Ruby
+    if (existsSync(join(projectPath, 'Gemfile'))) {
+      const gemfile = readFileSync(join(projectPath, 'Gemfile'), 'utf-8');
+      if (gemfile.includes('rails')) return 'rails';
+      if (gemfile.includes('sinatra')) return 'sinatra';
+      if (gemfile.includes('grape')) return 'grape';
+      if (gemfile.includes('hanami')) return 'hanami';
+    }
+    
+    // PHP
+    if (existsSync(join(projectPath, 'composer.json'))) {
+      const composer = JSON.parse(readFileSync(join(projectPath, 'composer.json'), 'utf-8'));
+      const require = { ...composer.require, ...composer['require-dev'] };
+      if (require['laravel/framework']) return 'laravel';
+      if (require['symfony/framework-bundle']) return 'symfony';
+      if (require['slim/slim']) return 'slim';
+      if (require['yiisoft/yii2']) return 'yii';
+    }
+    
+    // .NET / C#
+    if (existsSync(join(projectPath, 'Program.cs')) || existsSync(join(projectPath, 'Startup.cs'))) {
+      return 'aspnet';
+    }
+    const csprojFiles = readdirSync(projectPath).filter(f => f.endsWith('.csproj'));
+    if (csprojFiles.length > 0) {
+      const csproj = readFileSync(join(projectPath, csprojFiles[0]), 'utf-8');
+      if (csproj.includes('Microsoft.AspNetCore')) return 'aspnet';
+    }
+    
+    // Rust
+    if (existsSync(join(projectPath, 'Cargo.toml'))) {
+      const cargo = readFileSync(join(projectPath, 'Cargo.toml'), 'utf-8');
+      if (cargo.includes('actix-web')) return 'actix';
+      if (cargo.includes('rocket')) return 'rocket';
+      if (cargo.includes('axum')) return 'axum';
+      if (cargo.includes('warp')) return 'warp';
+    }
+    
+    // Dart/Flutter
+    if (existsSync(join(projectPath, 'pubspec.yaml'))) {
+      const pubspec = readFileSync(join(projectPath, 'pubspec.yaml'), 'utf-8');
+      if (pubspec.includes('shelf')) return 'shelf';
+      if (pubspec.includes('aqueduct')) return 'aqueduct';
+    }
+    
   } catch (e) {}
   return 'unknown';
 }
@@ -808,6 +890,397 @@ function parseSpringRoutes(projectPath: string): ApiEndpoint[] {
   });
 }
 
+// Go 파싱 (Gin, Echo, Fiber, Chi, Gorilla Mux)
+function parseGoRoutes(projectPath: string): ApiEndpoint[] {
+  const endpoints: ApiEndpoint[] = [];
+  
+  function scanDir(dir: string, depth: number = 0) {
+    if (depth > 8) return;
+    
+    try {
+      if (!existsSync(dir)) return;
+      const entries = readdirSync(dir);
+      
+      for (const entry of entries) {
+        if (['.git', 'vendor', 'testdata'].includes(entry)) continue;
+        
+        const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        
+        if (stat.isDirectory()) {
+          scanDir(fullPath, depth + 1);
+        } else if (extname(entry) === '.go') {
+          try {
+            const content = readFileSync(fullPath, 'utf-8');
+            const relativePath = relative(projectPath, fullPath);
+            let match;
+            
+            // Gin: r.GET("/path", handler), router.POST("/path", ...)
+            const ginRegex = /(?:r|router|g|gin|api|v1)\.(?:GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s*\(\s*["']([^"']+)["']/gi;
+            while ((match = ginRegex.exec(content)) !== null) {
+              const methodMatch = content.substring(match.index).match(/\.(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)/i);
+              if (!methodMatch) continue;
+              const method = methodMatch[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[1];
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'handler', params, isAsync: false, lineNumber,
+                framework: 'gin',
+              });
+            }
+            
+            // Echo: e.GET("/path", handler)
+            const echoRegex = /(?:e|echo|api)\.(?:GET|POST|PUT|PATCH|DELETE)\s*\(\s*["']([^"']+)["']/gi;
+            while ((match = echoRegex.exec(content)) !== null) {
+              const methodMatch = content.substring(match.index).match(/\.(GET|POST|PUT|PATCH|DELETE)/i);
+              if (!methodMatch) continue;
+              const method = methodMatch[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[1];
+              if (endpoints.some(ep => ep.path === path && ep.method === method && ep.filePath === relativePath)) continue;
+              
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'handler', params, isAsync: false, lineNumber,
+                framework: 'echo',
+              });
+            }
+            
+            // Fiber: app.Get("/path", handler)
+            const fiberRegex = /(?:app|f|fiber)\.(?:Get|Post|Put|Patch|Delete)\s*\(\s*["']([^"']+)["']/gi;
+            while ((match = fiberRegex.exec(content)) !== null) {
+              const methodMatch = content.substring(match.index).match(/\.(Get|Post|Put|Patch|Delete)/i);
+              if (!methodMatch) continue;
+              const method = methodMatch[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[1];
+              if (endpoints.some(ep => ep.path === path && ep.method === method && ep.filePath === relativePath)) continue;
+              
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'handler', params, isAsync: false, lineNumber,
+                framework: 'fiber',
+              });
+            }
+            
+            // http.HandleFunc / mux.HandleFunc
+            const httpRegex = /(?:http|mux|r)\.(?:HandleFunc|Handle)\s*\(\s*["']([^"']+)["']/gi;
+            while ((match = httpRegex.exec(content)) !== null) {
+              const path = match[1];
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `GET-${path}-${lineNumber}`,
+                method: 'GET', path, filePath: relativePath, fileName: entry,
+                handler: 'HandleFunc', params: [], isAsync: false, lineNumber,
+                framework: 'go-http',
+              });
+            }
+            
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+  }
+  
+  scanDir(projectPath);
+  return endpoints;
+}
+
+// Ruby 파싱 (Rails, Sinatra, Grape)
+function parseRubyRoutes(projectPath: string): ApiEndpoint[] {
+  const endpoints: ApiEndpoint[] = [];
+  
+  function scanDir(dir: string, depth: number = 0) {
+    if (depth > 8) return;
+    
+    try {
+      if (!existsSync(dir)) return;
+      const entries = readdirSync(dir);
+      
+      for (const entry of entries) {
+        if (['.git', 'vendor', 'node_modules', 'tmp', 'log'].includes(entry)) continue;
+        
+        const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        
+        if (stat.isDirectory()) {
+          scanDir(fullPath, depth + 1);
+        } else if (extname(entry) === '.rb') {
+          try {
+            const content = readFileSync(fullPath, 'utf-8');
+            const relativePath = relative(projectPath, fullPath);
+            let match;
+            
+            // Rails routes: get '/path', post '/path', resources :users
+            const railsRouteRegex = /(?:get|post|put|patch|delete)\s+['"]([^'"]+)['"]/gi;
+            while ((match = railsRouteRegex.exec(content)) !== null) {
+              const methodMatch = content.substring(match.index).match(/^(get|post|put|patch|delete)/i);
+              if (!methodMatch) continue;
+              const method = methodMatch[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[1];
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'action', params, isAsync: false, lineNumber,
+                framework: 'rails',
+              });
+            }
+            
+            // Sinatra: get '/path' do
+            const sinatraRegex = /^(?:get|post|put|patch|delete)\s+['"]([^'"]+)['"]\s+do/gim;
+            while ((match = sinatraRegex.exec(content)) !== null) {
+              const methodMatch = content.substring(match.index).match(/^(get|post|put|patch|delete)/i);
+              if (!methodMatch) continue;
+              const method = methodMatch[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[1];
+              if (endpoints.some(ep => ep.path === path && ep.method === method && ep.filePath === relativePath)) continue;
+              
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'block', params, isAsync: false, lineNumber,
+                framework: 'sinatra',
+              });
+            }
+            
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+  }
+  
+  // Rails routes are typically in config/routes.rb
+  scanDir(join(projectPath, 'config'));
+  scanDir(join(projectPath, 'app'));
+  scanDir(projectPath);
+  
+  return endpoints;
+}
+
+// PHP 파싱 (Laravel, Symfony, Slim)
+function parsePhpRoutes(projectPath: string): ApiEndpoint[] {
+  const endpoints: ApiEndpoint[] = [];
+  
+  function scanDir(dir: string, depth: number = 0) {
+    if (depth > 8) return;
+    
+    try {
+      if (!existsSync(dir)) return;
+      const entries = readdirSync(dir);
+      
+      for (const entry of entries) {
+        if (['.git', 'vendor', 'node_modules', 'storage', 'cache'].includes(entry)) continue;
+        
+        const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        
+        if (stat.isDirectory()) {
+          scanDir(fullPath, depth + 1);
+        } else if (extname(entry) === '.php') {
+          try {
+            const content = readFileSync(fullPath, 'utf-8');
+            const relativePath = relative(projectPath, fullPath);
+            let match;
+            
+            // Laravel: Route::get('/path', ...), Route::post('/path', ...)
+            const laravelRegex = /Route::(get|post|put|patch|delete)\s*\(\s*['"]([^'"]+)['"]/gi;
+            while ((match = laravelRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[2];
+              const params = (path.match(/\{(\w+)\}/g) || []).map(p => p.slice(1, -1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'controller', params, isAsync: false, lineNumber,
+                framework: 'laravel',
+              });
+            }
+            
+            // Laravel API resource: Route::apiResource('users', UserController::class)
+            const resourceRegex = /Route::apiResource\s*\(\s*['"]([^'"]+)['"]/gi;
+            while ((match = resourceRegex.exec(content)) !== null) {
+              const resource = match[1];
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              // Generate RESTful routes
+              const restMethods = [
+                { method: 'GET', path: `/${resource}` },
+                { method: 'GET', path: `/${resource}/{id}` },
+                { method: 'POST', path: `/${resource}` },
+                { method: 'PUT', path: `/${resource}/{id}` },
+                { method: 'DELETE', path: `/${resource}/{id}` },
+              ];
+              
+              for (const rm of restMethods) {
+                endpoints.push({
+                  id: `${rm.method}-${rm.path}-${lineNumber}`,
+                  method: rm.method as ApiEndpoint['method'],
+                  path: rm.path, filePath: relativePath, fileName: entry,
+                  handler: resource + 'Controller', params: rm.path.includes('{id}') ? ['id'] : [],
+                  isAsync: false, lineNumber, framework: 'laravel',
+                });
+              }
+            }
+            
+            // Slim: $app->get('/path', ...)
+            const slimRegex = /\$app->(get|post|put|patch|delete)\s*\(\s*['"]([^'"]+)['"]/gi;
+            while ((match = slimRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[2];
+              if (endpoints.some(ep => ep.path === path && ep.method === method && ep.filePath === relativePath)) continue;
+              
+              const params = (path.match(/\{(\w+)\}/g) || []).map(p => p.slice(1, -1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'handler', params, isAsync: false, lineNumber,
+                framework: 'slim',
+              });
+            }
+            
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+  }
+  
+  scanDir(join(projectPath, 'routes'));
+  scanDir(join(projectPath, 'app'));
+  scanDir(projectPath);
+  
+  return endpoints;
+}
+
+// Rust 파싱 (Actix-web, Axum, Rocket)
+function parseRustRoutes(projectPath: string): ApiEndpoint[] {
+  const endpoints: ApiEndpoint[] = [];
+  
+  function scanDir(dir: string, depth: number = 0) {
+    if (depth > 8) return;
+    
+    try {
+      if (!existsSync(dir)) return;
+      const entries = readdirSync(dir);
+      
+      for (const entry of entries) {
+        if (['.git', 'target'].includes(entry)) continue;
+        
+        const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        
+        if (stat.isDirectory()) {
+          scanDir(fullPath, depth + 1);
+        } else if (extname(entry) === '.rs') {
+          try {
+            const content = readFileSync(fullPath, 'utf-8');
+            const relativePath = relative(projectPath, fullPath);
+            let match;
+            
+            // Actix: #[get("/path")], #[post("/path")]
+            const actixRegex = /#\[(get|post|put|patch|delete)\s*\(\s*["']([^"']+)["']\s*\)\]/gi;
+            while ((match = actixRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[2];
+              const params = (path.match(/\{(\w+)\}/g) || []).map(p => p.slice(1, -1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              // Find handler function name
+              const afterAttr = content.substring(match.index);
+              const fnMatch = afterAttr.match(/async\s+fn\s+(\w+)|fn\s+(\w+)/);
+              const handler = fnMatch ? (fnMatch[1] || fnMatch[2]) : 'handler';
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler, params, isAsync: afterAttr.includes('async fn'), lineNumber,
+                framework: 'actix',
+              });
+            }
+            
+            // Rocket: #[get("/path")]
+            const rocketRegex = /#\[(get|post|put|patch|delete)\s*\(\s*["']([^"']+)["']/gi;
+            while ((match = rocketRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[2];
+              if (endpoints.some(ep => ep.path === path && ep.method === method && ep.filePath === relativePath)) continue;
+              
+              const params = (path.match(/<(\w+)>/g) || []).map(p => p.slice(1, -1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              const afterAttr = content.substring(match.index);
+              const fnMatch = afterAttr.match(/fn\s+(\w+)/);
+              const handler = fnMatch ? fnMatch[1] : 'handler';
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler, params, isAsync: false, lineNumber,
+                framework: 'rocket',
+              });
+            }
+            
+            // Axum: .route("/path", get(handler))
+            const axumRegex = /\.route\s*\(\s*["']([^"']+)["']\s*,\s*(get|post|put|patch|delete)\s*\(/gi;
+            while ((match = axumRegex.exec(content)) !== null) {
+              const path = match[1];
+              const method = match[2].toUpperCase() as ApiEndpoint['method'];
+              if (endpoints.some(ep => ep.path === path && ep.method === method && ep.filePath === relativePath)) continue;
+              
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'handler', params, isAsync: true, lineNumber,
+                framework: 'axum',
+              });
+            }
+            
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+  }
+  
+  scanDir(join(projectPath, 'src'));
+  scanDir(projectPath);
+  
+  return endpoints;
+}
+
 // 엔드포인트를 그룹으로 구성
 function groupEndpoints(endpoints: ApiEndpoint[]): ApiGroup[] {
   const groups: Map<string, ApiEndpoint[]> = new Map();
@@ -868,15 +1341,50 @@ export async function GET(
       case 'koa':
       case 'nestjs':
       case 'hono':
+      case 'hapi':
+      case 'restify':
+      case 'trpc':
         endpoints = parseTypeScriptRoutes(project.path);
         break;
       case 'fastapi':
       case 'flask':
       case 'django':
+      case 'tornado':
+      case 'aiohttp':
+      case 'sanic':
         endpoints = parsePythonRoutes(project.path);
         break;
       case 'spring':
+      case 'quarkus':
+      case 'micronaut':
+      case 'vertx':
         endpoints = parseSpringRoutes(project.path);
+        break;
+      case 'gin':
+      case 'echo':
+      case 'fiber':
+      case 'gorilla':
+      case 'chi':
+      case 'go-http':
+        endpoints = parseGoRoutes(project.path);
+        break;
+      case 'rails':
+      case 'sinatra':
+      case 'grape':
+      case 'hanami':
+        endpoints = parseRubyRoutes(project.path);
+        break;
+      case 'laravel':
+      case 'symfony':
+      case 'slim':
+      case 'yii':
+        endpoints = parsePhpRoutes(project.path);
+        break;
+      case 'actix':
+      case 'rocket':
+      case 'axum':
+      case 'warp':
+        endpoints = parseRustRoutes(project.path);
         break;
       default:
         // Try all parsers
@@ -885,6 +1393,10 @@ export async function GET(
           ...parseTypeScriptRoutes(project.path),
           ...parsePythonRoutes(project.path),
           ...parseSpringRoutes(project.path),
+          ...parseGoRoutes(project.path),
+          ...parseRubyRoutes(project.path),
+          ...parsePhpRoutes(project.path),
+          ...parseRustRoutes(project.path),
         ];
     }
     
