@@ -491,6 +491,199 @@ function parseLaravelModels(content: string): Omit<ErdData, 'schemaPath' | 'sche
   return { models, relations };
 }
 
+// Java JPA/Hibernate Entity 파싱
+function parseJavaEntities(content: string): Omit<ErdData, 'schemaPath' | 'schemaType' | 'language'> {
+  const models: ErdModel[] = [];
+  const relations: ErdRelation[] = [];
+  
+  // @Entity class 패턴
+  const entityRegex = /@Entity[\s\S]*?(?:@Table\s*\(\s*name\s*=\s*["'](\w+)["']\s*\))?\s*public\s+class\s+(\w+)(?:\s+extends\s+\w+)?(?:\s+implements\s+[\w,\s]+)?\s*\{([\s\S]*?)(?=\n@Entity|\npublic\s+class|$)/g;
+  let match;
+  
+  while ((match = entityRegex.exec(content)) !== null) {
+    const tableName = match[1];
+    const className = match[2];
+    const classBody = match[3];
+    const modelName = tableName || className;
+    const fields: ErdField[] = [];
+    
+    // 필드 파싱 (private Type fieldName;)
+    const fieldRegex = /(?:@(\w+)(?:\([^)]*\))?[\s\S]*?)*private\s+(\w+)(?:<[\w<>,\s]+>)?\s+(\w+)\s*;/g;
+    let fieldMatch;
+    
+    while ((fieldMatch = fieldRegex.exec(classBody)) !== null) {
+      const annotations = classBody.substring(
+        Math.max(0, classBody.lastIndexOf('\n', fieldMatch.index)),
+        fieldMatch.index
+      );
+      
+      const fieldType = fieldMatch[2];
+      const fieldName = fieldMatch[3];
+      
+      const isPrimaryKey = annotations.includes('@Id');
+      const isRelation = annotations.includes('@ManyToOne') || 
+                         annotations.includes('@OneToMany') || 
+                         annotations.includes('@OneToOne') || 
+                         annotations.includes('@ManyToMany');
+      const isOptional = annotations.includes('nullable = true') || 
+                         annotations.includes('optional = true');
+      const isArray = fieldType === 'List' || fieldType === 'Set' || fieldType === 'Collection';
+      
+      const attributes: string[] = [];
+      if (isPrimaryKey) attributes.push('@Id');
+      if (annotations.includes('@Column')) attributes.push('@Column');
+      if (annotations.includes('@GeneratedValue')) attributes.push('@GeneratedValue');
+      if (annotations.includes('@JoinColumn')) attributes.push('@JoinColumn');
+      
+      fields.push({
+        name: fieldName,
+        type: fieldType,
+        isPrimaryKey,
+        isOptional,
+        isArray,
+        isRelation,
+        attributes,
+      });
+      
+      // 관계 추출
+      if (isRelation) {
+        let relType: '1-1' | '1-n' | 'n-1' | 'n-n' = 'n-1';
+        if (annotations.includes('@OneToOne')) relType = '1-1';
+        else if (annotations.includes('@OneToMany')) relType = '1-n';
+        else if (annotations.includes('@ManyToMany')) relType = 'n-n';
+        
+        // 타겟 엔티티 추출
+        const targetMatch = annotations.match(/(?:targetEntity\s*=\s*)?(\w+)\.class/) ||
+                           annotations.match(/@(?:ManyToOne|OneToOne|OneToMany|ManyToMany)\s*(?:\([^)]*\))?\s*(?:@\w+\s*(?:\([^)]*\))?)*\s*private\s+(?:List|Set|Collection)?(?:<)?(\w+)/);
+        
+        if (targetMatch) {
+          relations.push({
+            from: modelName,
+            to: targetMatch[1] || targetMatch[2] || fieldType,
+            fromField: fieldName,
+            toField: 'id',
+            type: relType,
+          });
+        }
+      }
+    }
+    
+    // id 필드가 없으면 추가
+    if (!fields.some(f => f.isPrimaryKey)) {
+      fields.unshift({
+        name: 'id',
+        type: 'Long',
+        isPrimaryKey: true,
+        isOptional: false,
+        isArray: false,
+        isRelation: false,
+        attributes: ['@Id', '@GeneratedValue'],
+      });
+    }
+    
+    models.push({ name: modelName, fields, category: categorizeModel(modelName) });
+  }
+  
+  return { models, relations };
+}
+
+// Python SQLAlchemy/FastAPI SQLModel 파싱
+function parsePythonModels(content: string): Omit<ErdData, 'schemaPath' | 'schemaType' | 'language'> {
+  const models: ErdModel[] = [];
+  const relations: ErdRelation[] = [];
+  
+  // class ModelName(Base): 또는 class ModelName(SQLModel, table=True): 패턴
+  const classRegex = /class\s+(\w+)\s*\(\s*(?:Base|SQLModel|db\.Model|DeclarativeBase)[\w\s,=]*\)\s*:([\s\S]*?)(?=\nclass\s|\n[^\s#]|$)/g;
+  let match;
+  
+  while ((match = classRegex.exec(content)) !== null) {
+    const modelName = match[1];
+    const classBody = match[2];
+    const fields: ErdField[] = [];
+    
+    // __tablename__ 추출
+    const tableNameMatch = classBody.match(/__tablename__\s*=\s*['"](\w+)['"]/);
+    const tableName = tableNameMatch ? tableNameMatch[1] : modelName.toLowerCase();
+    
+    // SQLAlchemy Column 필드 패턴
+    const columnRegex = /(\w+)(?:\s*:\s*[\w\[\]]+)?\s*=\s*(?:Column|Field|mapped_column)\s*\(\s*([\w.]+)?([^)]*)\)/g;
+    let colMatch;
+    
+    while ((colMatch = columnRegex.exec(classBody)) !== null) {
+      const [, fieldName, fieldType, args] = colMatch;
+      
+      const isPrimaryKey = args.includes('primary_key=True') || args.includes('primary_key: True');
+      const isRelation = fieldType?.includes('ForeignKey') || args.includes('ForeignKey');
+      const isOptional = args.includes('nullable=True') || args.includes('Optional');
+      
+      const attributes: string[] = [];
+      if (isPrimaryKey) attributes.push('primary_key');
+      if (args.includes('unique=True')) attributes.push('unique');
+      if (args.includes('index=True')) attributes.push('index');
+      if (args.includes('default=')) attributes.push('default');
+      
+      fields.push({
+        name: fieldName,
+        type: fieldType || 'String',
+        isPrimaryKey,
+        isOptional,
+        isArray: false,
+        isRelation,
+        attributes,
+      });
+      
+      // ForeignKey 관계 추출
+      if (isRelation) {
+        const fkMatch = args.match(/ForeignKey\s*\(\s*['"](\w+)\.(\w+)['"]/);
+        if (fkMatch) {
+          relations.push({
+            from: modelName,
+            to: fkMatch[1].charAt(0).toUpperCase() + fkMatch[1].slice(1),
+            fromField: fieldName,
+            toField: fkMatch[2],
+            type: 'n-1',
+          });
+        }
+      }
+    }
+    
+    // relationship 필드 파싱
+    const relRegex = /(\w+)(?:\s*:\s*[\w\[\]"]+)?\s*=\s*relationship\s*\(\s*['"]?(\w+)['"]?/g;
+    let relMatch;
+    while ((relMatch = relRegex.exec(classBody)) !== null) {
+      const [, fieldName, targetModel] = relMatch;
+      const isBackRef = classBody.includes('back_populates');
+      
+      fields.push({
+        name: fieldName,
+        type: targetModel,
+        isPrimaryKey: false,
+        isOptional: true,
+        isArray: classBody.includes(`List["${targetModel}"]`) || classBody.includes(`list[${targetModel}]`),
+        isRelation: true,
+        attributes: ['relationship'],
+      });
+    }
+    
+    // id 필드가 없으면 추가
+    if (!fields.some(f => f.isPrimaryKey)) {
+      fields.unshift({
+        name: 'id',
+        type: 'Integer',
+        isPrimaryKey: true,
+        isOptional: false,
+        isArray: false,
+        isRelation: false,
+        attributes: ['primary_key'],
+      });
+    }
+    
+    models.push({ name: modelName, fields, category: categorizeModel(modelName) });
+  }
+  
+  return { models, relations };
+}
+
 // ===================== SCHEMA FINDER =====================
 
 interface SchemaFile {
@@ -504,16 +697,33 @@ function findSchemaFiles(projectPath: string, frameworks: string[]): SchemaFile[
   
   // 프레임워크별 스키마 파일 위치
   const schemaPatterns: Record<string, { paths: string[]; type: SchemaType }> = {
+    // JavaScript/TypeScript
     prisma: { paths: ['prisma/schema.prisma', 'schema.prisma'], type: 'prisma' },
-    django: { paths: ['**/models.py', 'models.py'], type: 'django' },
-    sqlalchemy: { paths: ['**/models.py', 'models/*.py'], type: 'sqlalchemy' },
-    typeorm: { paths: ['src/entity/*.ts', 'entities/*.ts', '**/entity/*.ts'], type: 'typeorm' },
+    typeorm: { paths: ['src/entity/*.ts', 'src/entities/*.ts', 'entities/*.ts', '**/entity/*.ts'], type: 'typeorm' },
     sequelize: { paths: ['models/*.js', 'models/*.ts', 'src/models/*.ts'], type: 'sequelize' },
+    
+    // Python
+    django: { paths: ['**/models.py', 'models.py', 'app/models.py'], type: 'django' },
+    sqlalchemy: { paths: ['**/models.py', 'models/*.py', 'app/models/*.py'], type: 'sqlalchemy' },
+    fastapi: { paths: ['app/models.py', 'src/models.py', '**/models.py'], type: 'sqlalchemy' },
+    flask: { paths: ['app/models.py', 'models.py'], type: 'sqlalchemy' },
+    
+    // Java/Spring
+    spring: { paths: ['src/main/java/**/entity/*.java', 'src/main/java/**/model/*.java', 'src/main/java/**/domain/*.java'], type: 'spring' },
+    hibernate: { paths: ['src/main/java/**/entity/*.java', 'src/main/java/**/*.java'], type: 'spring' },
+    
+    // PHP
     laravel: { paths: ['app/Models/*.php', 'app/*.php'], type: 'laravel' },
+    
+    // Ruby
     rails: { paths: ['app/models/*.rb', 'db/schema.rb'], type: 'rails' },
-    spring: { paths: ['src/main/java/**/entity/*.java', 'src/main/java/**/model/*.java'], type: 'spring' },
-    dotnet: { paths: ['Models/*.cs', '**/Models/*.cs', '**/Entities/*.cs'], type: 'dotnet' },
-    gorm: { paths: ['models/*.go', 'model/*.go', '**/model/*.go'], type: 'go' },
+    
+    // .NET
+    dotnet: { paths: ['Models/*.cs', '**/Models/*.cs', '**/Entities/*.cs', '**/Domain/*.cs'], type: 'dotnet' },
+    
+    // Go
+    gorm: { paths: ['models/*.go', 'model/*.go', '**/model/*.go', 'internal/models/*.go'], type: 'go' },
+    ent: { paths: ['ent/schema/*.go'], type: 'go' },
   };
   
   // 우선순위: 감지된 프레임워크부터 검색
@@ -643,11 +853,22 @@ export async function GET(
         erdData = parsePrismaSchema(content);
         break;
       case 'django':
-      case 'sqlalchemy':
         erdData = parseDjangoModels(content);
+        break;
+      case 'sqlalchemy':
+        // Python SQLAlchemy/SQLModel 파서 사용
+        erdData = parsePythonModels(content);
+        // 결과가 없으면 Django 파서 시도
+        if (erdData.models.length === 0) {
+          erdData = parseDjangoModels(content);
+        }
         break;
       case 'typeorm':
         erdData = parseTypeORMEntities(content);
+        break;
+      case 'spring':
+        // Java JPA/Hibernate 파서 사용
+        erdData = parseJavaEntities(content);
         break;
       case 'laravel':
         erdData = parseLaravelModels(content);
@@ -656,8 +877,31 @@ export async function GET(
         erdData = parseSQLSchema(content);
         break;
       default:
-        // 기본적으로 Prisma 파서 시도
-        erdData = parsePrismaSchema(content);
+        // 파일 확장자 기반 폴백
+        const ext = schemaFile.path.toLowerCase();
+        if (ext.endsWith('.java')) {
+          erdData = parseJavaEntities(content);
+        } else if (ext.endsWith('.py')) {
+          erdData = parsePythonModels(content);
+          if (erdData.models.length === 0) {
+            erdData = parseDjangoModels(content);
+          }
+        } else if (ext.endsWith('.prisma')) {
+          erdData = parsePrismaSchema(content);
+        } else if (ext.endsWith('.sql')) {
+          erdData = parseSQLSchema(content);
+        } else if (ext.endsWith('.ts') || ext.endsWith('.js')) {
+          erdData = parseTypeORMEntities(content);
+        } else if (ext.endsWith('.php')) {
+          erdData = parseLaravelModels(content);
+        } else {
+          // 최후의 폴백: 모든 파서 시도
+          erdData = parsePrismaSchema(content);
+          if (erdData.models.length === 0) erdData = parseJavaEntities(content);
+          if (erdData.models.length === 0) erdData = parsePythonModels(content);
+          if (erdData.models.length === 0) erdData = parseDjangoModels(content);
+          if (erdData.models.length === 0) erdData = parseSQLSchema(content);
+        }
     }
     
     return NextResponse.json({
