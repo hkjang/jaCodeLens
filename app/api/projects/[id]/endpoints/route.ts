@@ -3,6 +3,29 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { join, extname, relative } from 'path';
 import { prisma } from '@/lib/db';
 
+interface ApiParameter {
+  name: string;
+  type: string;
+  required: boolean;
+  defaultValue?: string;
+  description?: string;
+  in: 'path' | 'query' | 'body' | 'header';
+}
+
+interface ApiRequestBody {
+  contentType: string;
+  schema?: string;
+  example?: string;
+  required: boolean;
+}
+
+interface ApiResponse {
+  statusCode: number;
+  contentType?: string;
+  schema?: string;
+  description?: string;
+}
+
 interface ApiEndpoint {
   id: string;
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS' | 'HEAD';
@@ -11,19 +34,47 @@ interface ApiEndpoint {
   fileName: string;
   handler: string;
   params: string[];
+  // 상세 파라미터 정보
+  parameters?: ApiParameter[];
+  requestBody?: ApiRequestBody;
+  responses?: ApiResponse[];
+  // 기타 메타데이터
   queryParams?: string[];
   middleware?: string[];
   description?: string;
-  requestBody?: string;
+  summary?: string;
   responseType?: string;
   isAsync: boolean;
   lineNumber: number;
   framework: string;
-  // 추가 메타데이터
-  auth?: 'jwt' | 'session' | 'apikey' | 'oauth' | 'none';
+  auth?: 'jwt' | 'session' | 'apikey' | 'oauth' | 'basic' | 'bearer' | 'none';
   deprecated?: boolean;
   tags?: string[];
-  statusCodes?: number[];
+  contentType?: string;
+  headers?: { name: string; value: string; required: boolean }[];
+  // 고급 메타데이터 (NEW)
+  validation?: {
+    rules: { field: string; rule: string; message?: string }[];
+    schema?: string;
+  };
+  rateLimit?: {
+    limit: number;
+    window: string;
+    key?: string;
+  };
+  cache?: {
+    ttl?: number;
+    strategy?: 'private' | 'public' | 'no-cache' | 'no-store';
+    tags?: string[];
+  };
+  apiVersion?: string;
+  operationId?: string;
+  security?: string[];
+  cors?: {
+    origins?: string[];
+    methods?: string[];
+    headers?: string[];
+  };
 }
 
 interface ApiGroup {
@@ -140,6 +191,910 @@ function detectFramework(projectPath: string): string {
   return 'unknown';
 }
 
+// ===== 파라미터 추출 헬퍼 함수들 =====
+
+// TypeScript/JavaScript에서 함수 파라미터와 타입 추출
+function extractTsParams(content: string, startIndex: number): { params: ApiParameter[], body?: ApiRequestBody, responses: ApiResponse[] } {
+  const params: ApiParameter[] = [];
+  const responses: ApiResponse[] = [];
+  let body: ApiRequestBody | undefined;
+  
+  // 함수 시그니처에서 파라미터 추출
+  const funcContent = content.substring(startIndex, startIndex + 1000);
+  
+  // request.json() - body 추출
+  if (funcContent.includes('request.json()') || funcContent.includes('req.body')) {
+    body = {
+      contentType: 'application/json',
+      required: true,
+    };
+    
+    // 타입 추출 시도: const data: UserInput = await request.json()
+    const bodyTypeMatch = funcContent.match(/(?:const|let)\s+(\w+)(?::\s*(\w+))?\s*=\s*await\s+request\.json\(\)/);
+    if (bodyTypeMatch && bodyTypeMatch[2]) {
+      body.schema = bodyTypeMatch[2];
+    }
+  }
+  
+  // request.formData() - multipart body
+  if (funcContent.includes('request.formData()') || funcContent.includes('req.files')) {
+    body = {
+      contentType: 'multipart/form-data',
+      required: true,
+    };
+  }
+  
+  // URL query params: searchParams.get('key'), req.query.key
+  const queryMatches = funcContent.matchAll(/searchParams\.get\s*\(\s*['"](\w+)['"]\)|req\.query\.(\w+)/g);
+  for (const m of queryMatches) {
+    const name = m[1] || m[2];
+    if (!params.some(p => p.name === name)) {
+      params.push({
+        name,
+        type: 'string',
+        required: false,
+        in: 'query',
+      });
+    }
+  }
+  
+  // req.query 구조분해: const { id, name } = req.query
+  const queryDestructMatch = funcContent.match(/const\s*\{([^}]+)\}\s*=\s*req\.query/);
+  if (queryDestructMatch) {
+    const names = queryDestructMatch[1].split(',').map(s => s.trim().split(':')[0].trim());
+    for (const name of names) {
+      if (name && !params.some(p => p.name === name)) {
+        params.push({ name, type: 'string', required: false, in: 'query' });
+      }
+    }
+  }
+  
+  // Response detection
+  if (funcContent.includes('NextResponse.json') || funcContent.includes('res.json')) {
+    responses.push({ statusCode: 200, contentType: 'application/json' });
+  }
+  if (funcContent.includes('status: 201') || funcContent.includes('status(201)')) {
+    responses.push({ statusCode: 201, description: 'Created' });
+  }
+  if (funcContent.includes('status: 400') || funcContent.includes('status(400)')) {
+    responses.push({ statusCode: 400, description: 'Bad Request' });
+  }
+  if (funcContent.includes('status: 401') || funcContent.includes('status(401)')) {
+    responses.push({ statusCode: 401, description: 'Unauthorized' });
+  }
+  if (funcContent.includes('status: 404') || funcContent.includes('status(404)')) {
+    responses.push({ statusCode: 404, description: 'Not Found' });
+  }
+  if (funcContent.includes('status: 500') || funcContent.includes('status(500)')) {
+    responses.push({ statusCode: 500, description: 'Internal Server Error' });
+  }
+  
+  // Auth detection
+  const authMatch = funcContent.match(/(?:getServerSession|getToken|jwt\.verify|Bearer|auth\(\)|requireAuth)/i);
+  
+  return { params, body, responses };
+}
+
+// Python에서 파라미터 추출
+function extractPythonParams(content: string, startIndex: number): { params: ApiParameter[], body?: ApiRequestBody, responses: ApiResponse[] } {
+  const params: ApiParameter[] = [];
+  const responses: ApiResponse[] = [];
+  let body: ApiRequestBody | undefined;
+  
+  const funcContent = content.substring(startIndex, startIndex + 1000);
+  
+  // FastAPI Path/Query params: def endpoint(id: int, name: str = Query(...))
+  const paramMatches = funcContent.matchAll(/(\w+)\s*:\s*(\w+)(?:\s*=\s*(?:Query\([^)]*\)|Path\([^)]*\)|([^,)]+)))?/g);
+  for (const m of paramMatches) {
+    const name = m[1];
+    const type = m[2];
+    if (['request', 'response', 'db', 'session', 'self', 'cls', 'background_tasks'].includes(name.toLowerCase())) continue;
+    
+    const required = !m[3] || m[3].includes('...');
+    params.push({
+      name,
+      type: type || 'string',
+      required,
+      in: funcContent.includes(`Path(`) && funcContent.includes(name) ? 'path' : 'query',
+    });
+  }
+  
+  // Pydantic body: def endpoint(data: UserCreate)
+  const bodyMatch = funcContent.match(/(\w+)\s*:\s*(\w+(?:Model|Schema|Input|Create|Update|Request))/);
+  if (bodyMatch) {
+    body = {
+      contentType: 'application/json',
+      schema: bodyMatch[2],
+      required: true,
+    };
+  }
+  
+  // Response
+  if (funcContent.includes('JSONResponse') || funcContent.includes('return {')) {
+    responses.push({ statusCode: 200, contentType: 'application/json' });
+  }
+  
+  return { params, body, responses };
+}
+
+// Java/Spring에서 파라미터 추출
+function extractJavaParams(content: string, startIndex: number): { params: ApiParameter[], body?: ApiRequestBody, responses: ApiResponse[] } {
+  const params: ApiParameter[] = [];
+  const responses: ApiResponse[] = [];
+  let body: ApiRequestBody | undefined;
+  
+  const funcContent = content.substring(startIndex, startIndex + 1500);
+  
+  // @RequestParam
+  const requestParamMatches = funcContent.matchAll(/@RequestParam(?:\([^)]*\))?\s*(?:(\w+)\s+)?(\w+)/g);
+  for (const m of requestParamMatches) {
+    params.push({
+      name: m[2],
+      type: m[1] || 'String',
+      required: !funcContent.includes(`@RequestParam(required = false, name = "${m[2]}")`),
+      in: 'query',
+    });
+  }
+  
+  // @PathVariable
+  const pathVarMatches = funcContent.matchAll(/@PathVariable(?:\([^)]*\))?\s*(?:(\w+)\s+)?(\w+)/g);
+  for (const m of pathVarMatches) {
+    params.push({
+      name: m[2],
+      type: m[1] || 'String',
+      required: true,
+      in: 'path',
+    });
+  }
+  
+  // @RequestBody
+  const bodyMatch = funcContent.match(/@RequestBody\s+(\w+)\s+(\w+)/);
+  if (bodyMatch) {
+    body = {
+      contentType: 'application/json',
+      schema: bodyMatch[1],
+      required: true,
+    };
+  }
+  
+  // @RequestHeader
+  const headerMatches = funcContent.matchAll(/@RequestHeader(?:\([^)]*\))?\s*(?:(\w+)\s+)?(\w+)/g);
+  for (const m of headerMatches) {
+    params.push({
+      name: m[2],
+      type: m[1] || 'String',
+      required: true,
+      in: 'header',
+    });
+  }
+  
+  // ResponseEntity
+  if (funcContent.includes('ResponseEntity')) {
+    responses.push({ statusCode: 200, contentType: 'application/json' });
+    if (funcContent.includes('ResponseEntity.status(201)') || funcContent.includes('HttpStatus.CREATED')) {
+      responses.push({ statusCode: 201, description: 'Created' });
+    }
+  }
+  
+  return { params, body, responses };
+}
+
+// 레거시 Java 프레임워크 파라미터 추출 (Servlet, Struts, JSP)
+function extractLegacyJavaParams(content: string, startIndex: number): { params: ApiParameter[], body?: ApiRequestBody, responses: ApiResponse[] } {
+  const params: ApiParameter[] = [];
+  const responses: ApiResponse[] = [];
+  let body: ApiRequestBody | undefined;
+  
+  const funcContent = content.substring(startIndex, startIndex + 2000);
+  
+  // ===== Servlet =====
+  // request.getParameter("key")
+  const servletParamMatches = funcContent.matchAll(/request\.getParameter\s*\(\s*["'](\w+)["']\)/g);
+  for (const m of servletParamMatches) {
+    params.push({ name: m[1], type: 'String', required: false, in: 'query' });
+  }
+  
+  // request.getParameterValues("key")
+  const arrayParamMatches = funcContent.matchAll(/request\.getParameterValues\s*\(\s*["'](\w+)["']\)/g);
+  for (const m of arrayParamMatches) {
+    params.push({ name: m[1], type: 'String[]', required: false, in: 'query' });
+  }
+  
+  // request.getAttribute("key")
+  const attrMatches = funcContent.matchAll(/request\.getAttribute\s*\(\s*["'](\w+)["']\)/g);
+  for (const m of attrMatches) {
+    params.push({ name: m[1], type: 'Object', required: false, in: 'body' });
+  }
+  
+  // request.getHeader("key")
+  const headerMatches = funcContent.matchAll(/request\.getHeader\s*\(\s*["']([^"']+)["']\)/g);
+  for (const m of headerMatches) {
+    params.push({ name: m[1], type: 'String', required: false, in: 'header' });
+  }
+  
+  // request.getInputStream() / getReader() - body
+  if (funcContent.includes('getInputStream()') || funcContent.includes('getReader()')) {
+    body = {
+      contentType: 'application/json',
+      required: true,
+    };
+  }
+  
+  // request.getPart() - multipart
+  if (funcContent.includes('getPart(') || funcContent.includes('getParts()')) {
+    body = {
+      contentType: 'multipart/form-data',
+      required: true,
+    };
+    // 파일 파라미터 추출
+    const partMatches = funcContent.matchAll(/request\.getPart\s*\(\s*["'](\w+)["']\)/g);
+    for (const m of partMatches) {
+      params.push({ name: m[1], type: 'File', required: true, in: 'body' });
+    }
+  }
+  
+  // ===== Struts 1/2 =====
+  // ActionForm fields: private String username;
+  const strutsFieldMatches = funcContent.matchAll(/private\s+(String|int|Integer|boolean|Boolean|Long|Double)\s+(\w+)\s*;/g);
+  for (const m of strutsFieldMatches) {
+    params.push({ name: m[2], type: m[1], required: false, in: 'body' });
+  }
+  
+  // Struts 2 @Required, @RequiredString
+  const requiredMatches = funcContent.matchAll(/@Required(?:String)?\s*(?:\([^)]*\))?\s*private\s+(\w+)\s+(\w+)/g);
+  for (const m of requiredMatches) {
+    params.push({ name: m[2], type: m[1], required: true, in: 'body' });
+  }
+  
+  // getText() - form data
+  if (funcContent.includes('ActionForm') || funcContent.includes('extends ActionSupport')) {
+    body = {
+      contentType: 'application/x-www-form-urlencoded',
+      required: false,
+    };
+  }
+  
+  // ===== JAX-RS =====
+  // @QueryParam("key")
+  const jaxrsQueryMatches = funcContent.matchAll(/@QueryParam\s*\(\s*["'](\w+)["']\)\s*(\w+)\s+(\w+)/g);
+  for (const m of jaxrsQueryMatches) {
+    params.push({ name: m[1], type: m[2], required: false, in: 'query' });
+  }
+  
+  // @PathParam("key")
+  const jaxrsPathMatches = funcContent.matchAll(/@PathParam\s*\(\s*["'](\w+)["']\)\s*(\w+)\s+(\w+)/g);
+  for (const m of jaxrsPathMatches) {
+    params.push({ name: m[1], type: m[2], required: true, in: 'path' });
+  }
+  
+  // @HeaderParam("key")
+  const jaxrsHeaderMatches = funcContent.matchAll(/@HeaderParam\s*\(\s*["']([^"']+)["']\)\s*(\w+)\s+(\w+)/g);
+  for (const m of jaxrsHeaderMatches) {
+    params.push({ name: m[1], type: m[2], required: false, in: 'header' });
+  }
+  
+  // @FormParam("key")
+  const jaxrsFormMatches = funcContent.matchAll(/@FormParam\s*\(\s*["'](\w+)["']\)\s*(\w+)\s+(\w+)/g);
+  for (const m of jaxrsFormMatches) {
+    params.push({ name: m[1], type: m[2], required: false, in: 'body' });
+    body = { contentType: 'application/x-www-form-urlencoded', required: true };
+  }
+  
+  // @BeanParam
+  const beanParamMatch = funcContent.match(/@BeanParam\s+(\w+)\s+(\w+)/);
+  if (beanParamMatch) {
+    body = {
+      contentType: 'application/json',
+      schema: beanParamMatch[1],
+      required: true,
+    };
+  }
+  
+  // JAX-RS body (no annotation = body)
+  const jaxrsBodyMatch = funcContent.match(/public\s+\w+\s+\w+\s*\([^)]*(?<!@\w+\s)(\w+)\s+(\w+)[^)]*\)/);
+  if (jaxrsBodyMatch && !body) {
+    const typeClass = jaxrsBodyMatch[1];
+    if (!['String', 'int', 'long', 'Integer', 'Long', 'HttpServletRequest', 'HttpServletResponse'].includes(typeClass)) {
+      body = {
+        contentType: 'application/json',
+        schema: typeClass,
+        required: true,
+      };
+    }
+  }
+  
+  // ===== Response Detection =====
+  // response.setStatus(200)
+  if (funcContent.includes('response.setStatus(') || funcContent.includes('PrintWriter')) {
+    responses.push({ statusCode: 200, contentType: 'application/json' });
+  }
+  if (funcContent.includes('SC_CREATED') || funcContent.includes('setStatus(201)')) {
+    responses.push({ statusCode: 201, description: 'Created' });
+  }
+  if (funcContent.includes('SC_BAD_REQUEST') || funcContent.includes('setStatus(400)')) {
+    responses.push({ statusCode: 400, description: 'Bad Request' });
+  }
+  if (funcContent.includes('SC_NOT_FOUND') || funcContent.includes('setStatus(404)')) {
+    responses.push({ statusCode: 404, description: 'Not Found' });
+  }
+  if (funcContent.includes('sendError(')) {
+    responses.push({ statusCode: 500, description: 'Internal Server Error' });
+  }
+  
+  // JAX-RS Response
+  if (funcContent.includes('Response.ok') || funcContent.includes('Response.status')) {
+    responses.push({ statusCode: 200, contentType: 'application/json' });
+  }
+  
+  return { params, body, responses };
+}
+
+// 인증 타입 감지
+function detectAuthType(content: string): ApiEndpoint['auth'] {
+  if (content.includes('@PreAuthorize') || content.includes('getServerSession') || content.includes('useSession')) {
+    return 'session';
+  }
+  if (content.includes('jwt') || content.includes('JWT') || content.includes('JwtAuth')) {
+    return 'jwt';
+  }
+  if (content.includes('Bearer') || content.includes('Authorization')) {
+    return 'bearer';
+  }
+  if (content.includes('apiKey') || content.includes('x-api-key') || content.includes('API_KEY')) {
+    return 'apikey';
+  }
+  if (content.includes('OAuth') || content.includes('oauth')) {
+    return 'oauth';
+  }
+  if (content.includes('BasicAuth') || content.includes('basic auth')) {
+    return 'basic';
+  }
+  return undefined;
+}
+
+// 미들웨어 추출
+function extractMiddleware(content: string, startIndex: number): string[] {
+  const middleware: string[] = [];
+  const funcContent = content.substring(Math.max(0, startIndex - 500), startIndex + 200);
+  
+  // Express/Koa: router.get('/path', auth, validate, handler)
+  const expressMiddlewareMatch = funcContent.match(/\.(get|post|put|patch|delete)\s*\([^,]+,\s*([^)]+)\)/i);
+  if (expressMiddlewareMatch) {
+    const parts = expressMiddlewareMatch[2].split(',').map(s => s.trim());
+    if (parts.length > 1) {
+      middleware.push(...parts.slice(0, -1));
+    }
+  }
+  
+  // NestJS: @UseGuards(), @UseInterceptors(), @UsePipes()
+  const nestMiddleware = funcContent.matchAll(/@Use(Guards|Interceptors|Pipes)\s*\(\s*([^)]+)\s*\)/g);
+  for (const m of nestMiddleware) {
+    middleware.push(`${m[1]}: ${m[2].trim()}`);
+  }
+  
+  // FastAPI: Depends()
+  const fastapiDeps = funcContent.matchAll(/Depends\s*\(\s*(\w+)\s*\)/g);
+  for (const m of fastapiDeps) {
+    middleware.push(`Depends: ${m[1]}`);
+  }
+  
+  // Spring: @PreAuthorize, @Secured, @RolesAllowed
+  const springAuth = funcContent.matchAll(/@(PreAuthorize|Secured|RolesAllowed)\s*\(\s*([^)]+)\s*\)/g);
+  for (const m of springAuth) {
+    middleware.push(`${m[1]}: ${m[2].trim()}`);
+  }
+  
+  // Express: app.use()
+  const expressUse = funcContent.matchAll(/app\.use\s*\(\s*['"]?([^'")\s,]+)/g);
+  for (const m of expressUse) {
+    if (!middleware.includes(m[1])) {
+      middleware.push(m[1]);
+    }
+  }
+  
+  return middleware;
+}
+
+// 유효성 검증 규칙 추출
+function extractValidation(content: string, startIndex: number): ApiEndpoint['validation'] | undefined {
+  const rules: { field: string; rule: string; message?: string }[] = [];
+  let schema: string | undefined;
+  
+  const funcContent = content.substring(startIndex, startIndex + 2000);
+  
+  // Zod schema
+  const zodMatch = funcContent.match(/(\w+Schema)\.parse|z\.object\s*\(\s*\{([^}]+)\}/);
+  if (zodMatch) {
+    schema = zodMatch[1] || 'ZodSchema';
+    // Extract Zod fields
+    const zodFields = funcContent.matchAll(/(\w+)\s*:\s*z\.(\w+)\(\)/g);
+    for (const m of zodFields) {
+      rules.push({ field: m[1], rule: `z.${m[2]}()` });
+    }
+  }
+  
+  // Yup schema
+  const yupMatch = funcContent.match(/yup\.object\s*\(\s*\{([^}]+)\}/);
+  if (yupMatch) {
+    schema = 'YupSchema';
+    const yupFields = funcContent.matchAll(/(\w+)\s*:\s*yup\.(\w+)/g);
+    for (const m of yupFields) {
+      rules.push({ field: m[1], rule: `yup.${m[2]}` });
+    }
+  }
+  
+  // Express-validator
+  const evMatches = funcContent.matchAll(/(?:body|query|param)\s*\(\s*['"](\w+)['"]\s*\)\s*\.(\w+)/g);
+  for (const m of evMatches) {
+    rules.push({ field: m[1], rule: m[2] });
+  }
+  
+  // class-validator (NestJS)
+  const cvMatches = funcContent.matchAll(/@(IsString|IsNumber|IsEmail|IsOptional|MinLength|MaxLength|Min|Max)\s*\(\s*([^)]*)\)/g);
+  for (const m of cvMatches) {
+    rules.push({ field: 'unknown', rule: `@${m[1]}(${m[2]})` });
+  }
+  
+  // Laravel validation
+  const laravelValidate = funcContent.match(/\$request->validate\s*\(\s*\[([^\]]+)\]/);
+  if (laravelValidate) {
+    const fieldRules = laravelValidate[1].matchAll(/['"](\w+)['"]\s*=>\s*['"]([^'"]+)['"]/g);
+    for (const m of fieldRules) {
+      rules.push({ field: m[1], rule: m[2] });
+    }
+  }
+  
+  // Spring @Valid, @NotNull, @Size
+  const springValidation = funcContent.matchAll(/@(NotNull|NotEmpty|NotBlank|Size|Min|Max|Email|Pattern)\s*(?:\([^)]*\))?/g);
+  for (const m of springValidation) {
+    rules.push({ field: 'unknown', rule: `@${m[1]}` });
+  }
+  
+  // FastAPI Field()
+  const fastapiField = funcContent.matchAll(/Field\s*\(\s*([^)]+)\)/g);
+  for (const m of fastapiField) {
+    const constraints = m[1];
+    if (constraints.includes('min_length') || constraints.includes('max_length')) {
+      rules.push({ field: 'unknown', rule: `Field(${constraints})` });
+    }
+  }
+  
+  if (rules.length === 0 && !schema) return undefined;
+  return { rules, schema };
+}
+
+// 레이트 리밋 감지
+function extractRateLimit(content: string): ApiEndpoint['rateLimit'] | undefined {
+  // Express-rate-limit
+  const rateLimitMatch = content.match(/rateLimit\s*\(\s*\{[^}]*windowMs\s*:\s*(\d+)[^}]*max\s*:\s*(\d+)/);
+  if (rateLimitMatch) {
+    return {
+      limit: parseInt(rateLimitMatch[2]),
+      window: `${parseInt(rateLimitMatch[1]) / 1000}s`,
+    };
+  }
+  
+  // NestJS @Throttle
+  const throttleMatch = content.match(/@Throttle\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)/);
+  if (throttleMatch) {
+    return {
+      limit: parseInt(throttleMatch[1]),
+      window: `${throttleMatch[2]}s`,
+    };
+  }
+  
+  // FastAPI slowapi
+  const slowapiMatch = content.match(/limiter\.limit\s*\(\s*["']([^"']+)["']\s*\)/);
+  if (slowapiMatch) {
+    const [limit, window] = slowapiMatch[1].split('/');
+    return {
+      limit: parseInt(limit),
+      window: window || 'minute',
+    };
+  }
+  
+  // Spring @RateLimiter
+  const springRateMatch = content.match(/@RateLimiter\s*\(\s*name\s*=\s*["']([^"']+)["']/);
+  if (springRateMatch) {
+    return {
+      limit: 10, // default
+      window: '1s',
+      key: springRateMatch[1],
+    };
+  }
+  
+  return undefined;
+}
+
+// 캐싱 감지
+function extractCache(content: string): ApiEndpoint['cache'] | undefined {
+  // Express: res.set('Cache-Control', ...)
+  const cacheControlMatch = content.match(/['"]Cache-Control['"]\s*,\s*['"]([^"']+)['"]/i);
+  if (cacheControlMatch) {
+    const cc = cacheControlMatch[1];
+    const maxAgeMatch = cc.match(/max-age=(\d+)/);
+    return {
+      ttl: maxAgeMatch ? parseInt(maxAgeMatch[1]) : undefined,
+      strategy: cc.includes('private') ? 'private' : cc.includes('public') ? 'public' : cc.includes('no-cache') ? 'no-cache' : 'no-store',
+    };
+  }
+  
+  // NestJS @CacheKey, @CacheTTL
+  const cacheTTLMatch = content.match(/@CacheTTL\s*\(\s*(\d+)\s*\)/);
+  if (cacheTTLMatch) {
+    return {
+      ttl: parseInt(cacheTTLMatch[1]),
+    };
+  }
+  
+  // Spring @Cacheable
+  const springCacheMatch = content.match(/@Cacheable\s*\(\s*(?:value\s*=\s*)?["']([^"']+)["']/);
+  if (springCacheMatch) {
+    return {
+      tags: [springCacheMatch[1]],
+    };
+  }
+  
+  // FastAPI @cache
+  const fastapiCacheMatch = content.match(/@cache\s*\(\s*expire\s*=\s*(\d+)/);
+  if (fastapiCacheMatch) {
+    return {
+      ttl: parseInt(fastapiCacheMatch[1]),
+    };
+  }
+  
+  return undefined;
+}
+
+// API 버전 감지
+function detectApiVersion(path: string, content: string): string | undefined {
+  // Path-based versioning: /v1/users, /api/v2/
+  const pathVersion = path.match(/\/v(\d+(?:\.\d+)?)\//);
+  if (pathVersion) {
+    return `v${pathVersion[1]}`;
+  }
+  
+  // Header-based: @ApiVersion  
+  const headerVersion = content.match(/@ApiVersion\s*\(\s*["']([^"']+)["']\s*\)/);
+  if (headerVersion) {
+    return headerVersion[1];
+  }
+  
+  // Spring: @RequestMapping with produces/consumes version
+  const springVersion = content.match(/produces\s*=\s*["'][^"']*version=(\d+)/);
+  if (springVersion) {
+    return `v${springVersion[1]}`;
+  }
+  
+  return undefined;
+}
+
+// JSDoc/Docstring에서 설명 추출
+function extractDescription(content: string, startIndex: number): { description?: string; summary?: string; tags?: string[] } {
+  const beforeFunc = content.substring(Math.max(0, startIndex - 500), startIndex);
+  const result: { description?: string; summary?: string; tags?: string[] } = {};
+  
+  // JSDoc /** ... */
+  const jsdocMatch = beforeFunc.match(/\/\*\*\s*([\s\S]*?)\s*\*\/\s*$/);
+  if (jsdocMatch) {
+    const jsdoc = jsdocMatch[1];
+    
+    // @description or first line
+    const descMatch = jsdoc.match(/@description\s+(.+)|^\s*\*?\s*([^\n@]+)/m);
+    if (descMatch) {
+      result.description = (descMatch[1] || descMatch[2]).replace(/^\s*\*\s*/gm, '').trim();
+    }
+    
+    // @summary
+    const summaryMatch = jsdoc.match(/@summary\s+(.+)/);
+    if (summaryMatch) {
+      result.summary = summaryMatch[1].trim();
+    }
+    
+    // @tags
+    const tagsMatch = jsdoc.match(/@tags?\s+(.+)/);
+    if (tagsMatch) {
+      result.tags = tagsMatch[1].split(/[,\s]+/).filter(Boolean);
+    }
+  }
+  
+  // Python docstring """ ... """
+  const docstringMatch = beforeFunc.match(/"""([\s\S]*?)"""/);
+  if (docstringMatch && !result.description) {
+    result.description = docstringMatch[1].trim().split('\n')[0];
+  }
+  
+  // Single line comment // ...
+  const singleLineMatch = beforeFunc.match(/\/\/\s*(.+)\s*$/m);
+  if (singleLineMatch && !result.description) {
+    result.description = singleLineMatch[1].trim();
+  }
+  
+  return result;
+}
+
+// Go에서 파라미터 추출 (Gin, Echo, Fiber)
+function extractGoParams(content: string, startIndex: number): { params: ApiParameter[], body?: ApiRequestBody, responses: ApiResponse[] } {
+  const params: ApiParameter[] = [];
+  const responses: ApiResponse[] = [];
+  let body: ApiRequestBody | undefined;
+  
+  const funcContent = content.substring(startIndex, startIndex + 1500);
+  
+  // Gin: c.Query("key"), c.Param("id"), c.PostForm("field")
+  const queryMatches = funcContent.matchAll(/c\.Query\s*\(\s*["'](\w+)["']\)/g);
+  for (const m of queryMatches) {
+    params.push({ name: m[1], type: 'string', required: false, in: 'query' });
+  }
+  
+  const paramMatches = funcContent.matchAll(/c\.Param\s*\(\s*["'](\w+)["']\)/g);
+  for (const m of paramMatches) {
+    params.push({ name: m[1], type: 'string', required: true, in: 'path' });
+  }
+  
+  // c.ShouldBindJSON(&data) - body
+  if (funcContent.includes('ShouldBindJSON') || funcContent.includes('BindJSON')) {
+    const bindMatch = funcContent.match(/ShouldBindJSON\s*\(\s*&(\w+)\)/);
+    body = {
+      contentType: 'application/json',
+      schema: bindMatch ? bindMatch[1] : undefined,
+      required: true,
+    };
+  }
+  
+  // Echo: c.QueryParam("key"), c.Param("id"), c.Bind(&data)
+  const echoQueryMatches = funcContent.matchAll(/c\.QueryParam\s*\(\s*["'](\w+)["']\)/g);
+  for (const m of echoQueryMatches) {
+    if (!params.some(p => p.name === m[1])) {
+      params.push({ name: m[1], type: 'string', required: false, in: 'query' });
+    }
+  }
+  
+  if (funcContent.includes('c.Bind') && !body) {
+    body = { contentType: 'application/json', required: true };
+  }
+  
+  // Fiber: c.Query("key"), c.Params("id"), c.BodyParser(&data)
+  if (funcContent.includes('BodyParser')) {
+    body = { contentType: 'application/json', required: true };
+  }
+  
+  // Response
+  if (funcContent.includes('c.JSON') || funcContent.includes('c.IndentedJSON')) {
+    responses.push({ statusCode: 200, contentType: 'application/json' });
+  }
+  if (funcContent.includes('http.StatusCreated')) {
+    responses.push({ statusCode: 201, description: 'Created' });
+  }
+  if (funcContent.includes('http.StatusBadRequest')) {
+    responses.push({ statusCode: 400, description: 'Bad Request' });
+  }
+  if (funcContent.includes('http.StatusNotFound')) {
+    responses.push({ statusCode: 404, description: 'Not Found' });
+  }
+  
+  return { params, body, responses };
+}
+
+// Ruby에서 파라미터 추출 (Rails, Sinatra)
+function extractRubyParams(content: string, startIndex: number): { params: ApiParameter[], body?: ApiRequestBody, responses: ApiResponse[] } {
+  const params: ApiParameter[] = [];
+  const responses: ApiResponse[] = [];
+  let body: ApiRequestBody | undefined;
+  
+  const funcContent = content.substring(startIndex, startIndex + 1000);
+  
+  // Rails: params[:id], params.require(:user).permit(:name, :email)
+  const paramMatches = funcContent.matchAll(/params\[:(\w+)\]/g);
+  for (const m of paramMatches) {
+    params.push({ name: m[1], type: 'string', required: true, in: 'query' });
+  }
+  
+  // params.require(:user)
+  const requireMatch = funcContent.match(/params\.require\s*\(\s*:(\w+)\s*\)/);
+  if (requireMatch) {
+    body = {
+      contentType: 'application/json',
+      schema: requireMatch[1],
+      required: true,
+    };
+    
+    // .permit(:name, :email)
+    const permitMatch = funcContent.match(/\.permit\s*\(\s*([^)]+)\s*\)/);
+    if (permitMatch) {
+      const fields = permitMatch[1].match(/:(\w+)/g);
+      if (fields) {
+        body.example = `{ ${fields.map(f => `"${f.slice(1)}": "..."`).join(', ')} }`;
+      }
+    }
+  }
+  
+  // render json:
+  if (funcContent.includes('render json:') || funcContent.includes('render :json')) {
+    responses.push({ statusCode: 200, contentType: 'application/json' });
+  }
+  if (funcContent.includes('status: :created')) {
+    responses.push({ statusCode: 201, description: 'Created' });
+  }
+  if (funcContent.includes('status: :not_found')) {
+    responses.push({ statusCode: 404, description: 'Not Found' });
+  }
+  
+  return { params, body, responses };
+}
+
+// PHP에서 파라미터 추출 (Laravel, Slim)
+function extractPhpParams(content: string, startIndex: number): { params: ApiParameter[], body?: ApiRequestBody, responses: ApiResponse[] } {
+  const params: ApiParameter[] = [];
+  const responses: ApiResponse[] = [];
+  let body: ApiRequestBody | undefined;
+  
+  const funcContent = content.substring(startIndex, startIndex + 1500);
+  
+  // Laravel: $request->query('key'), $request->input('field'), $request->all()
+  const queryMatches = funcContent.matchAll(/\$request->(?:query|get)\s*\(\s*['"](\w+)['"]/g);
+  for (const m of queryMatches) {
+    params.push({ name: m[1], type: 'string', required: false, in: 'query' });
+  }
+  
+  const inputMatches = funcContent.matchAll(/\$request->input\s*\(\s*['"](\w+)['"]/g);
+  for (const m of inputMatches) {
+    params.push({ name: m[1], type: 'string', required: false, in: 'body' });
+  }
+  
+  // $request->validate([...])
+  const validateMatch = funcContent.match(/\$request->validate\s*\(\s*\[([^\]]+)\]/);
+  if (validateMatch) {
+    body = {
+      contentType: 'application/json',
+      required: true,
+    };
+    
+    const fieldMatches = validateMatch[1].matchAll(/['"](\w+)['"]\s*=>/g);
+    for (const m of fieldMatches) {
+      params.push({ name: m[1], type: 'string', required: true, in: 'body' });
+    }
+  }
+  
+  // Route parameter: Route::get('/users/{id}', ...) - extract from path  
+  // response()->json()
+  if (funcContent.includes('response()->json') || funcContent.includes('return response(')) {
+    responses.push({ statusCode: 200, contentType: 'application/json' });
+  }
+  if (funcContent.includes('201')) {
+    responses.push({ statusCode: 201, description: 'Created' });
+  }
+  if (funcContent.includes('404')) {
+    responses.push({ statusCode: 404, description: 'Not Found' });
+  }
+  
+  return { params, body, responses };
+}
+
+// Rust에서 파라미터 추출 (Actix, Axum, Rocket)
+function extractRustParams(content: string, startIndex: number): { params: ApiParameter[], body?: ApiRequestBody, responses: ApiResponse[] } {
+  const params: ApiParameter[] = [];
+  const responses: ApiResponse[] = [];
+  let body: ApiRequestBody | undefined;
+  
+  const funcContent = content.substring(startIndex, startIndex + 1500);
+  
+  // Actix: web::Path<(i32,)>, web::Query<QueryParams>, web::Json<CreateUser>
+  const pathMatch = funcContent.match(/web::Path<\(([^)]+)\)>/);
+  if (pathMatch) {
+    const types = pathMatch[1].split(',').map(t => t.trim());
+    types.forEach((t, i) => {
+      params.push({ name: `param${i}`, type: t || 'string', required: true, in: 'path' });
+    });
+  }
+  
+  const queryMatch = funcContent.match(/web::Query<(\w+)>/);
+  if (queryMatch) {
+    params.push({ name: 'query', type: queryMatch[1], required: false, in: 'query' });
+  }
+  
+  const jsonMatch = funcContent.match(/web::Json<(\w+)>/);
+  if (jsonMatch) {
+    body = {
+      contentType: 'application/json',
+      schema: jsonMatch[1],
+      required: true,
+    };
+  }
+  
+  // Axum: Path<(i32,)>, Query<Params>, Json<Data>
+  const axumPathMatch = funcContent.match(/Path<\(([^)]+)\)>/);
+  if (axumPathMatch && !pathMatch) {
+    const types = axumPathMatch[1].split(',').map(t => t.trim());
+    types.forEach((t, i) => {
+      params.push({ name: `param${i}`, type: t || 'string', required: true, in: 'path' });
+    });
+  }
+  
+  const axumJsonMatch = funcContent.match(/Json<(\w+)>/);
+  if (axumJsonMatch && !jsonMatch) {
+    body = {
+      contentType: 'application/json',
+      schema: axumJsonMatch[1],
+      required: true,
+    };
+  }
+  
+  // Rocket: form, data
+  const rocketDataMatch = funcContent.match(/data\s*=\s*"<(\w+)>"/);
+  if (rocketDataMatch) {
+    body = {
+      contentType: 'application/json',
+      schema: rocketDataMatch[1],
+      required: true,
+    };
+  }
+  
+  // Response: HttpResponse, Json, Status
+  if (funcContent.includes('HttpResponse::Ok') || funcContent.includes('Json(')) {
+    responses.push({ statusCode: 200, contentType: 'application/json' });
+  }
+  if (funcContent.includes('HttpResponse::Created') || funcContent.includes('Status::Created')) {
+    responses.push({ statusCode: 201, description: 'Created' });
+  }
+  if (funcContent.includes('HttpResponse::NotFound') || funcContent.includes('Status::NotFound')) {
+    responses.push({ statusCode: 404, description: 'Not Found' });
+  }
+  
+  return { params, body, responses };
+}
+
+// C# ASP.NET에서 파라미터 추출
+function extractCSharpParams(content: string, startIndex: number): { params: ApiParameter[], body?: ApiRequestBody, responses: ApiResponse[] } {
+  const params: ApiParameter[] = [];
+  const responses: ApiResponse[] = [];
+  let body: ApiRequestBody | undefined;
+  
+  const funcContent = content.substring(startIndex, startIndex + 1500);
+  
+  // [FromQuery] string name, [FromRoute] int id, [FromBody] UserDto user
+  const fromQueryMatches = funcContent.matchAll(/\[FromQuery\]\s*(\w+)\s+(\w+)/g);
+  for (const m of fromQueryMatches) {
+    params.push({ name: m[2], type: m[1], required: false, in: 'query' });
+  }
+  
+  const fromRouteMatches = funcContent.matchAll(/\[FromRoute\]\s*(\w+)\s+(\w+)/g);
+  for (const m of fromRouteMatches) {
+    params.push({ name: m[2], type: m[1], required: true, in: 'path' });
+  }
+  
+  const fromBodyMatch = funcContent.match(/\[FromBody\]\s*(\w+)\s+(\w+)/);
+  if (fromBodyMatch) {
+    body = {
+      contentType: 'application/json',
+      schema: fromBodyMatch[1],
+      required: true,
+    };
+  }
+  
+  // [FromHeader]
+  const fromHeaderMatches = funcContent.matchAll(/\[FromHeader\]\s*(\w+)\s+(\w+)/g);
+  for (const m of fromHeaderMatches) {
+    params.push({ name: m[2], type: m[1], required: true, in: 'header' });
+  }
+  
+  // ActionResult, IActionResult
+  if (funcContent.includes('Ok(') || funcContent.includes('ActionResult')) {
+    responses.push({ statusCode: 200, contentType: 'application/json' });
+  }
+  if (funcContent.includes('Created')) {
+    responses.push({ statusCode: 201, description: 'Created' });
+  }
+  if (funcContent.includes('BadRequest')) {
+    responses.push({ statusCode: 400, description: 'Bad Request' });
+  }
+  if (funcContent.includes('NotFound')) {
+    responses.push({ statusCode: 404, description: 'Not Found' });
+  }
+  
+  return { params, body, responses };
+}
+
 // Next.js App Router 파싱
 function parseNextJsAppRouter(projectPath: string): ApiEndpoint[] {
   const endpoints: ApiEndpoint[] = [];
@@ -192,6 +1147,20 @@ function parseNextJsAppRouter(projectPath: string): ApiEndpoint[] {
               // Check if async
               const isAsync = content.substring(match.index, match.index + 50).includes('async');
               
+              // 상세 파라미터 추출
+              const extracted = extractTsParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              
+              // 경로 파라미터 추가
+              for (const p of params) {
+                extracted.params.push({
+                  name: p,
+                  type: 'string',
+                  required: true,
+                  in: 'path',
+                });
+              }
+              
               endpoints.push({
                 id: `${method}-${basePath}`,
                 method: method as ApiEndpoint['method'],
@@ -200,10 +1169,15 @@ function parseNextJsAppRouter(projectPath: string): ApiEndpoint[] {
                 fileName: entry,
                 handler: method,
                 params,
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
                 description,
                 isAsync,
                 lineNumber,
                 framework: 'nextjs',
+                auth,
+                contentType: extracted.body?.contentType || 'application/json',
               });
             }
           }
