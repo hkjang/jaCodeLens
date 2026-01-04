@@ -567,6 +567,222 @@ function parseSpringRoutes(projectPath: string): ApiEndpoint[] {
                 framework: 'jax-rs',
               });
             }
+            
+            // ===== 레거시 Java 프레임워크 지원 =====
+            
+            // Struts 2: @Action(value="/path"), @Actions
+            const strutsActionRegex = /@Action\s*\(\s*(?:value\s*=\s*)?["']([^"']+)["']/gi;
+            while ((match = strutsActionRegex.exec(content)) !== null) {
+              const path = match[1].startsWith('/') ? match[1] : '/' + match[1];
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              const afterAnnotation = content.substring(match.index);
+              const methodMatch = afterAnnotation.match(/public\s+\w+\s+(\w+)\s*\(/);
+              const handler = methodMatch ? methodMatch[1] : 'execute';
+              
+              endpoints.push({
+                id: `POST-${path}-${lineNumber}`,
+                method: 'POST',
+                path, filePath: relativePath, fileName: entry,
+                handler, params: [], isAsync: false, lineNumber,
+                framework: 'struts',
+              });
+            }
+            
+            // Struts 1: ActionMapping, structs-config.xml 패턴
+            const struts1Regex = /path\s*=\s*["']([^"']+)["'].*?(?:type|forward)\s*=\s*["']([^"'"]+)["']/gi;
+            while ((match = struts1Regex.exec(content)) !== null) {
+              const path = match[1];
+              const handler = match[2].split('.').pop() || 'action';
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `GET-${path}-${lineNumber}`,
+                method: 'GET',
+                path, filePath: relativePath, fileName: entry,
+                handler, params: [], isAsync: false, lineNumber,
+                framework: 'struts1',
+              });
+            }
+            
+            // Servlet: @WebServlet("/path"), doGet, doPost
+            const webServletMatch = content.match(/@WebServlet\s*\(\s*(?:urlPatterns\s*=\s*\{?\s*)?["']([^"']+)["']/);
+            if (webServletMatch) {
+              const path = webServletMatch[1];
+              const lines = content.substring(0, webServletMatch.index!).split('\n');
+              const baseLineNumber = lines.length;
+              
+              // doGet 메서드 찾기
+              if (content.includes('doGet')) {
+                const doGetMatch = content.match(/protected\s+void\s+doGet\s*\(/);
+                if (doGetMatch) {
+                  const ln = content.substring(0, doGetMatch.index!).split('\n').length;
+                  endpoints.push({
+                    id: `GET-${path}-${ln}`,
+                    method: 'GET',
+                    path, filePath: relativePath, fileName: entry,
+                    handler: 'doGet', params: [], isAsync: false, lineNumber: ln,
+                    framework: 'servlet',
+                  });
+                }
+              }
+              
+              // doPost 메서드 찾기
+              if (content.includes('doPost')) {
+                const doPostMatch = content.match(/protected\s+void\s+doPost\s*\(/);
+                if (doPostMatch) {
+                  const ln = content.substring(0, doPostMatch.index!).split('\n').length;
+                  endpoints.push({
+                    id: `POST-${path}-${ln}`,
+                    method: 'POST',
+                    path, filePath: relativePath, fileName: entry,
+                    handler: 'doPost', params: [], isAsync: false, lineNumber: ln,
+                    framework: 'servlet',
+                  });
+                }
+              }
+              
+              // doPut, doDelete
+              const httpMethods = ['doPut', 'doDelete'];
+              for (const m of httpMethods) {
+                if (content.includes(m)) {
+                  const methodPattern = new RegExp(`protected\\s+void\\s+${m}\\s*\\(`);
+                  const mm = content.match(methodPattern);
+                  if (mm) {
+                    const ln = content.substring(0, mm.index!).split('\n').length;
+                    endpoints.push({
+                      id: `${m.replace('do', '').toUpperCase()}-${path}-${ln}`,
+                      method: m.replace('do', '').toUpperCase() as ApiEndpoint['method'],
+                      path, filePath: relativePath, fileName: entry,
+                      handler: m, params: [], isAsync: false, lineNumber: ln,
+                      framework: 'servlet',
+                    });
+                  }
+                }
+              }
+            }
+            
+            // Play Framework (Java): GET("/path"), POST("/path") 라우트
+            const playRouteRegex = /(GET|POST|PUT|PATCH|DELETE)\s*\(\s*["']([^"']+)["']\s*\)/gi;
+            while ((match = playRouteRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[2];
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'action', params, isAsync: false, lineNumber,
+                framework: 'play',
+              });
+            }
+            
+            // Spark Framework (Java): get("/path", ...), post("/path", ...)
+            const sparkRegex = /(?:Spark\.)?(get|post|put|patch|delete)\s*\(\s*["']([^"']+)["']/gi;
+            while ((match = sparkRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[2];
+              if (endpoints.some(e => e.path === path && e.method === method && e.filePath === relativePath)) continue;
+              
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'lambda', params, isAsync: false, lineNumber,
+                framework: 'spark',
+              });
+            }
+            
+            // Vert.x: router.get("/path"), router.route("/path").handler(...)
+            const vertxRegex = /router\.(get|post|put|patch|delete|route)\s*\(\s*["']([^"']+)["']\s*\)/gi;
+            while ((match = vertxRegex.exec(content)) !== null) {
+              let method = match[1].toUpperCase();
+              if (method === 'ROUTE') method = 'GET'; // route() defaults to all methods
+              const path = match[2];
+              if (endpoints.some(e => e.path === path && e.method === method && e.filePath === relativePath)) continue;
+              
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method: method as ApiEndpoint['method'],
+                path, filePath: relativePath, fileName: entry,
+                handler: 'handler', params, isAsync: true, lineNumber,
+                framework: 'vertx',
+              });
+            }
+            
+            // Javalin: app.get("/path", ctx -> {}), app.post("/path", ...)
+            const javalinRegex = /app\.(get|post|put|patch|delete)\s*\(\s*["']([^"']+)["']/gi;
+            while ((match = javalinRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[2];
+              if (endpoints.some(e => e.path === path && e.method === method && e.filePath === relativePath)) continue;
+              
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'handler', params, isAsync: false, lineNumber,
+                framework: 'javalin',
+              });
+            }
+            
+            // Micronaut: @Get("/path"), @Post("/path")
+            const micronautRegex = /@(Get|Post|Put|Patch|Delete)\s*\(\s*(?:["']([^"']+)["'])?\s*\)/gi;
+            while ((match = micronautRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              let path = match[2] || '/';
+              const fullPath2 = (classPrefix + (path.startsWith('/') ? path : '/' + path)).replace(/\/\//g, '/');
+              
+              if (endpoints.some(e => e.path === fullPath2 && e.method === method && e.filePath === relativePath)) continue;
+              
+              const params = (fullPath2.match(/\{(\w+)\}/g) || []).map(p => p.slice(1, -1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              const afterAnnotation = content.substring(match.index);
+              const methodMatch = afterAnnotation.match(/(?:public\s+)?\w+\s+(\w+)\s*\(/);
+              const handler = methodMatch ? methodMatch[1] : 'handler';
+              
+              endpoints.push({
+                id: `${method}-${fullPath2}-${lineNumber}`,
+                method, path: fullPath2, filePath: relativePath, fileName: entry,
+                handler, params, isAsync: false, lineNumber,
+                framework: 'micronaut',
+              });
+            }
+            
+            // Quarkus (JAX-RS based but with additional patterns)
+            const quarkusRegex = /@(GET|POST|PUT|PATCH|DELETE)\s*\n\s*@Path\s*\(\s*["']([^"']+)["']\s*\)/gi;
+            while ((match = quarkusRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              const path = (jaxRsPrefix + match[2]).replace(/\/\//g, '/');
+              
+              if (endpoints.some(e => e.path === path && e.method === method && e.filePath === relativePath)) continue;
+              
+              const params = (path.match(/\{(\w+)\}/g) || []).map(p => p.slice(1, -1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'resource', params, isAsync: false, lineNumber,
+                framework: 'quarkus',
+              });
+            }
+            
           } catch (e) {
             // 파일 읽기 실패
           }
@@ -578,9 +794,18 @@ function parseSpringRoutes(projectPath: string): ApiEndpoint[] {
   // 여러 가능한 경로 스캔
   scanDir(join(projectPath, 'src'));
   scanDir(join(projectPath, 'app'));
+  scanDir(join(projectPath, 'conf')); // Play Framework routes
+  scanDir(join(projectPath, 'WEB-INF')); // Servlet/Struts config
   scanDir(projectPath);
   
-  return endpoints;
+  // 중복 제거
+  const seen = new Set<string>();
+  return endpoints.filter(ep => {
+    const key = `${ep.method}-${ep.path}-${ep.filePath}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // 엔드포인트를 그룹으로 구성
