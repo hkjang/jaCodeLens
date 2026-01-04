@@ -25,6 +25,7 @@ import {
   Key,
   Link2,
   ChevronRight,
+  ChevronLeft,
   Layers,
   Search,
   Move,
@@ -32,7 +33,17 @@ import {
   Keyboard,
   ChevronDown,
   BarChart3,
-  ArrowRight
+  ArrowRight,
+  Download,
+  Eye,
+  EyeOff,
+  Copy,
+  Check,
+  FileText,
+  Fullscreen,
+  Filter,
+  List,
+  GitBranch
 } from 'lucide-react';
 
 interface ErdField {
@@ -156,9 +167,18 @@ export default function ProjectErdPage() {
   const [showMinimap, setShowMinimap] = useState(true);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [highlightedRelations, setHighlightedRelations] = useState<Set<string>>(new Set());
+  const [compactMode, setCompactMode] = useState(false);
+  const [hoveredModel, setHoveredModel] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showRelationsList, setShowRelationsList] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fieldTypeFilter, setFieldTypeFilter] = useState<string | null>(null);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const mainContainerRef = useRef<HTMLDivElement>(null);
 
   // 검색 자동완성 제안
   const searchSuggestions = useMemo(() => {
@@ -249,12 +269,30 @@ export default function ProjectErdPage() {
 
   useEffect(() => {
     async function loadErdData() {
+      if (!projectId) return;
+      
       try {
-        const res = await fetch('/api/schema/erd');
-        if (!res.ok) throw new Error('Failed to fetch ERD data');
+        // 프로젝트별 ERD API 호출
+        const res = await fetch(`/api/projects/${projectId}/erd`);
+        if (!res.ok) {
+          const errorData = await res.json();
+          throw new Error(errorData.error || 'Failed to fetch ERD data');
+        }
         const data = await res.json();
-        setErdData(data);
-        setPositions(calculateInitialPositions(data.models));
+        
+        if (data.error) {
+          // 스키마 없는 경우 빈 결과로 처리
+          setErdData({ models: [], relations: [] });
+          setError(data.error);
+        } else {
+          setErdData(data);
+          if (data.models && data.models.length > 0) {
+            setPositions(calculateInitialPositions(data.models));
+          }
+          if (data.projectName) {
+            setProjectName(data.projectName);
+          }
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
@@ -262,7 +300,7 @@ export default function ProjectErdPage() {
       }
     }
     loadErdData();
-  }, []);
+  }, [projectId]);
 
   // 선택된 모델의 관계 하이라이트
   useEffect(() => {
@@ -467,6 +505,169 @@ export default function ProjectErdPage() {
     }
   }, [searchSuggestions, navigateToModel]);
 
+  // 이전/다음 모델로 이동
+  const navigateToPrevNext = useCallback((direction: 'prev' | 'next') => {
+    if (!erdData || !selectedModel) return;
+    
+    const currentIndex = erdData.models.findIndex(m => m.name === selectedModel.name);
+    if (currentIndex === -1) return;
+    
+    let newIndex: number;
+    if (direction === 'prev') {
+      newIndex = currentIndex === 0 ? erdData.models.length - 1 : currentIndex - 1;
+    } else {
+      newIndex = currentIndex === erdData.models.length - 1 ? 0 : currentIndex + 1;
+    }
+    
+    navigateToModel(erdData.models[newIndex].name);
+  }, [erdData, selectedModel, navigateToModel]);
+
+  // 스키마 복사
+  const copySchema = useCallback(() => {
+    if (!selectedModel) return;
+    
+    let schema = `model ${selectedModel.name} {\n`;
+    for (const field of selectedModel.fields) {
+      schema += `  ${field.name} ${field.type}`;
+      if (field.isOptional) schema += '?';
+      if (field.isArray) schema += '[]';
+      if (field.attributes.length > 0) schema += ` ${field.attributes.join(' ')}`;
+      schema += '\n';
+    }
+    schema += '}';
+    
+    navigator.clipboard.writeText(schema).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [selectedModel]);
+
+  // Mermaid ERD 내보내기
+  const exportMermaid = useCallback(() => {
+    if (!erdData) return;
+    
+    let mermaid = `erDiagram\n`;
+    
+    // 관계 추가
+    for (const rel of erdData.relations) {
+      const relSymbol = rel.type === '1-n' ? '||--o{' : rel.type === 'n-1' ? '}o--||' : '||--||';
+      mermaid += `  ${rel.from} ${relSymbol} ${rel.to} : "${rel.fromField}"\n`;
+    }
+    
+    // 엔티티 추가
+    for (const model of erdData.models) {
+      mermaid += `  ${model.name} {\n`;
+      for (const field of model.fields.slice(0, 10)) {
+        const type = field.type.replace(/[^a-zA-Z]/g, '');
+        mermaid += `    ${type} ${field.name}`;
+        if (field.isPrimaryKey) mermaid += ' PK';
+        if (field.isRelation) mermaid += ' FK';
+        mermaid += '\n';
+      }
+      mermaid += `  }\n`;
+    }
+    
+    const blob = new Blob([mermaid], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectName || 'erd'}_diagram.mmd`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [erdData, projectName]);
+
+  // SQL DDL 내보내기
+  const exportSQL = useCallback(() => {
+    if (!erdData) return;
+    
+    let sql = `-- Generated from Prisma Schema\n-- Project: ${projectName}\n-- Date: ${new Date().toISOString()}\n\n`;
+    
+    for (const model of erdData.models) {
+      sql += `CREATE TABLE "${model.name}" (\n`;
+      
+      const columns: string[] = [];
+      const constraints: string[] = [];
+      
+      for (const field of model.fields) {
+        if (field.isRelation && !field.isPrimaryKey) continue;
+        
+        let sqlType = 'TEXT';
+        switch (field.type.toLowerCase()) {
+          case 'int': sqlType = 'INTEGER'; break;
+          case 'float': sqlType = 'REAL'; break;
+          case 'boolean': sqlType = 'BOOLEAN'; break;
+          case 'datetime': sqlType = 'TIMESTAMP'; break;
+          case 'json': sqlType = 'JSONB'; break;
+          case 'string': sqlType = 'VARCHAR(255)'; break;
+          default: sqlType = 'TEXT';
+        }
+        
+        let columnDef = `  "${field.name}" ${sqlType}`;
+        if (!field.isOptional) columnDef += ' NOT NULL';
+        if (field.isPrimaryKey) columnDef += ' PRIMARY KEY';
+        if (field.attributes.includes('@unique')) columnDef += ' UNIQUE';
+        if (field.defaultValue) {
+          if (field.defaultValue === 'now()') {
+            columnDef += ' DEFAULT CURRENT_TIMESTAMP';
+          } else if (field.defaultValue === 'uuid()') {
+            columnDef += ' DEFAULT gen_random_uuid()';
+          }
+        }
+        
+        columns.push(columnDef);
+      }
+      
+      sql += columns.join(',\n');
+      if (constraints.length > 0) {
+        sql += ',\n' + constraints.join(',\n');
+      }
+      sql += '\n);\n\n';
+    }
+    
+    // Foreign Keys
+    sql += '-- Foreign Key Constraints\n';
+    for (const rel of erdData.relations) {
+      sql += `ALTER TABLE "${rel.from}" ADD CONSTRAINT "fk_${rel.from}_${rel.to}" `;
+      sql += `FOREIGN KEY ("${rel.fromField}") REFERENCES "${rel.to}"("${rel.toField}");\n`;
+    }
+    
+    const blob = new Blob([sql], { type: 'text/sql' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectName || 'schema'}.sql`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  }, [erdData, projectName]);
+
+  // 전체화면 토글
+  const toggleFullscreen = useCallback(() => {
+    if (!mainContainerRef.current) return;
+    
+    if (!document.fullscreenElement) {
+      mainContainerRef.current.requestFullscreen().then(() => {
+        setIsFullscreen(true);
+      }).catch(err => console.error(err));
+    } else {
+      document.exitFullscreen().then(() => {
+        setIsFullscreen(false);
+      }).catch(err => console.error(err));
+    }
+  }, []);
+
+  // 필드 타입 목록
+  const fieldTypes = useMemo(() => {
+    if (!erdData) return [];
+    const types = new Set<string>();
+    for (const model of erdData.models) {
+      for (const field of model.fields) {
+        types.add(field.type);
+      }
+    }
+    return Array.from(types).sort();
+  }, [erdData]);
+
   // 미니맵 클릭으로 이동
   const handleMinimapClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!erdData || !containerRef.current) return;
@@ -533,7 +734,10 @@ export default function ProjectErdPage() {
   }
 
   return (
-    <div className="h-[calc(100vh-6rem)] flex flex-col bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-sm">
+    <div 
+      ref={mainContainerRef}
+      className={`flex flex-col bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-sm ${isFullscreen ? 'h-screen' : 'h-[calc(100vh-6rem)]'}`}
+    >
       {/* 헤더 */}
       <header className="flex items-center justify-between px-6 py-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0 bg-gradient-to-r from-white to-gray-50 dark:from-gray-800 dark:to-gray-900">
         <div className="flex items-center gap-4">
@@ -642,11 +846,71 @@ export default function ProjectErdPage() {
             <Map className="w-4 h-4" />
           </button>
           <button
+            onClick={() => setCompactMode(prev => !prev)}
+            className={`p-2 rounded-lg transition ${compactMode ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'}`}
+            title="필드 숨기기"
+          >
+            {compactMode ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+          </button>
+          <button
             onClick={() => setShowShortcuts(prev => !prev)}
             className={`p-2 rounded-lg transition ${showShortcuts ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'}`}
             title="단축키 (?)"
           >
             <Keyboard className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setShowRelationsList(prev => !prev)}
+            className={`p-2 rounded-lg transition ${showRelationsList ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'}`}
+            title="관계 목록"
+          >
+            <GitBranch className="w-4 h-4" />
+          </button>
+          <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-1" />
+          
+          {/* 내보내기 드롭다운 */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(prev => !prev)}
+              className={`p-2 rounded-lg transition flex items-center gap-1 ${showExportMenu ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400'}`}
+              title="내보내기"
+            >
+              <Download className="w-4 h-4" />
+              <ChevronDown className="w-3 h-3" />
+            </button>
+            <AnimatePresence>
+              {showExportMenu && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 z-50 w-48"
+                >
+                  <button
+                    onClick={exportMermaid}
+                    className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+                  >
+                    <FileText className="w-4 h-4 text-purple-500" />
+                    Mermaid ERD (.mmd)
+                  </button>
+                  <button
+                    onClick={exportSQL}
+                    className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+                  >
+                    <Database className="w-4 h-4 text-blue-500" />
+                    SQL DDL (.sql)
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+          
+          <button
+            onClick={toggleFullscreen}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
+            title="전체화면"
+          >
+            <Fullscreen className="w-4 h-4 text-gray-600 dark:text-gray-400" />
           </button>
         </div>
       </header>
@@ -804,9 +1068,10 @@ export default function ProjectErdPage() {
                 
                 const color = categoryColors[model.category] || categoryColors['Other'];
                 const isSelected = selectedModel?.name === model.name;
-                const displayFields = model.fields.slice(0, 8);
-                const moreCount = model.fields.length - displayFields.length;
-                const boxHeight = 44 + displayFields.length * 26 + (moreCount > 0 ? 24 : 0);
+                const isHovered = hoveredModel === model.name;
+                const displayFields = compactMode ? [] : model.fields.slice(0, 8);
+                const moreCount = compactMode ? model.fields.length : model.fields.length - displayFields.length;
+                const boxHeight = compactMode ? 50 : (44 + displayFields.length * 26 + (moreCount > 0 ? 24 : 0));
                 
                 return (
                   <g
@@ -814,6 +1079,8 @@ export default function ProjectErdPage() {
                     transform={`translate(${pos.x}, ${pos.y})`}
                     onMouseDown={(e) => { e.stopPropagation(); handleMouseDown(e, model.name); }}
                     onClick={(e) => { e.stopPropagation(); setSelectedModel(model); }}
+                    onMouseEnter={() => setHoveredModel(model.name)}
+                    onMouseLeave={() => setHoveredModel(null)}
                     style={{ cursor: 'pointer' }}
                   >
                     {/* 선택 시 글로우 효과 */}
@@ -1075,6 +1342,63 @@ export default function ProjectErdPage() {
               </motion.div>
             )}
           </AnimatePresence>
+          
+          {/* 관계 목록 패널 */}
+          <AnimatePresence>
+            {showRelationsList && erdData && (
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="absolute top-4 right-4 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-4 w-80 max-h-96 overflow-y-auto z-50"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <span className="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                    <GitBranch className="w-4 h-4" />
+                    관계 목록 ({erdData.relations.length})
+                  </span>
+                  <button onClick={() => setShowRelationsList(false)} className="text-gray-400 hover:text-gray-600">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="space-y-2 text-sm">
+                  {erdData.relations.map((rel, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        const model = erdData.models.find(m => m.name === rel.from);
+                        if (model) {
+                          navigateToModel(model.name);
+                          setShowRelationsList(false);
+                        }
+                      }}
+                      className="w-full p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-left hover:bg-gray-100 dark:hover:bg-gray-600/50 transition"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span 
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: categoryColors[erdData.models.find(m => m.name === rel.from)?.category || 'Other']?.fill || '#6b7280' }}
+                        />
+                        <span className="font-medium text-gray-900 dark:text-white">{rel.from}</span>
+                        <ArrowRight className="w-3 h-3 text-gray-400" />
+                        <span 
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: categoryColors[erdData.models.find(m => m.name === rel.to)?.category || 'Other']?.fill || '#6b7280' }}
+                        />
+                        <span className="font-medium text-gray-900 dark:text-white">{rel.to}</span>
+                      </div>
+                      <div className="text-xs text-gray-400 mt-1">
+                        {rel.fromField} → {rel.toField} ({rel.type})
+                      </div>
+                    </button>
+                  ))}
+                  {erdData.relations.length === 0 && (
+                    <p className="text-gray-400 text-center py-4">관계가 없습니다</p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
         
         {/* 상세 정보 패널 */}
@@ -1087,25 +1411,55 @@ export default function ProjectErdPage() {
               transition={{ duration: 0.2 }}
               className="border-l border-gray-200 dark:border-gray-700 overflow-y-auto flex-shrink-0 bg-white dark:bg-gray-800"
             >
-              <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
-                <div className="flex items-center gap-3">
-                  <div 
-                    className="w-8 h-8 rounded-lg flex items-center justify-center"
-                    style={{ backgroundColor: categoryColors[selectedModel.category]?.fill || '#6b7280' }}
+              <div className="p-4 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800 z-10">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <div 
+                      className="w-8 h-8 rounded-lg flex items-center justify-center"
+                      style={{ backgroundColor: categoryColors[selectedModel.category]?.fill || '#6b7280' }}
+                    >
+                      <Layers className="w-4 h-4 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-900 dark:text-white">{selectedModel.name}</h3>
+                      <p className="text-xs text-gray-500">{selectedModel.category} • {selectedModel.fields.length} 필드</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedModel(null)}
+                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition"
                   >
-                    <Layers className="w-4 h-4 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900 dark:text-white">{selectedModel.name}</h3>
-                    <p className="text-xs text-gray-500">{selectedModel.category} • {selectedModel.fields.length} 필드</p>
-                  </div>
+                    <X className="w-5 h-5 text-gray-400" />
+                  </button>
                 </div>
-                <button
-                  onClick={() => setSelectedModel(null)}
-                  className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition"
-                >
-                  <X className="w-5 h-5 text-gray-400" />
-                </button>
+                
+                {/* 네비게이션 및 액션 버튼 */}
+                <div className="flex items-center gap-1 mt-3">
+                  <button
+                    onClick={() => navigateToPrevNext('prev')}
+                    className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition"
+                    title="이전 모델"
+                  >
+                    <ChevronLeft className="w-3 h-3" />
+                    이전
+                  </button>
+                  <button
+                    onClick={() => navigateToPrevNext('next')}
+                    className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition"
+                    title="다음 모델"
+                  >
+                    다음
+                    <ChevronRight className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={copySchema}
+                    className="flex items-center justify-center gap-1 px-3 py-1.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 hover:bg-blue-200 dark:hover:bg-blue-800/50 rounded-lg transition"
+                    title="스키마 복사"
+                  >
+                    {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    {copied ? '복사됨' : '복사'}
+                  </button>
+                </div>
               </div>
               
               <div className="p-4">
