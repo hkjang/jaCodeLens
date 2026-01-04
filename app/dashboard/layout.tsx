@@ -27,7 +27,8 @@ import {
   Plus,
   ChevronRight,
   ExternalLink,
-  Search
+  Search,
+  Database
 } from 'lucide-react';
 import { useRole, UserRole, roleConfigs } from '@/lib/contexts/RoleContext';
 import QuickActions from '@/components/QuickActions';
@@ -45,6 +46,7 @@ const projectMenuItems = [
   { href: '/results', icon: <BarChart3 className="w-4 h-4" />, label: '분석 결과' },
   { href: '/risks', icon: <AlertTriangle className="w-4 h-4" />, label: '리스크 맵' },
   { href: '/architecture', icon: <Layers className="w-4 h-4" />, label: '아키텍처' },
+  { href: '/erd', icon: <Database className="w-4 h-4" />, label: 'ERD 스키마' },
   { href: '/history/trends', icon: <TrendingUp className="w-4 h-4" />, label: '히스토리' },
   { href: '/settings', icon: <Settings className="w-4 h-4" />, label: '설정' },
 ];
