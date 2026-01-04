@@ -320,44 +320,110 @@ export default function ProjectResultsPage() {
 
   return (
     <div className="space-y-6">
-      {/* 이슈 상세 모달 */}
+      {/* 이슈 상세 모달 - 개선된 버전 */}
       {selectedIssue && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setSelectedIssue(null)}>
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-2xl w-full mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${getSeverityColor(selectedIssue.severity)}`}>
-                {getSeverityIcon(selectedIssue.severity)}
-                {selectedIssue.severity}
-              </span>
-              <button onClick={() => setSelectedIssue(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">{selectedIssue.message}</h3>
-            <div className="flex items-center gap-4 text-sm text-gray-500 mb-4">
-              <span className="flex items-center gap-1">
-                <FileCode className="w-4 h-4" />
-                {selectedIssue.filePath}:{selectedIssue.lineNumber}
-              </span>
-              <button onClick={() => copyToClipboard(`${selectedIssue.filePath}:${selectedIssue.lineNumber}`)} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded" title="경로 복사">
-                <Copy className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg mb-4">
-              <span className="text-xs text-gray-500">카테고리</span>
-              <p className="font-medium text-gray-900 dark:text-white">{selectedIssue.category}</p>
-            </div>
-            {selectedIssue.suggestion && (
-              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                <span className="text-xs text-blue-500">💡 제안</span>
-                <p className="text-blue-700 dark:text-blue-300">{selectedIssue.suggestion}</p>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setSelectedIssue(null)}>
+          <div 
+            className="bg-white dark:bg-gray-800 rounded-2xl max-w-3xl w-full shadow-2xl overflow-hidden animate-slideUp" 
+            onClick={e => e.stopPropagation()}
+          >
+            {/* 헤더 - 심각도 배너 */}
+            <div className={`px-6 py-4 ${
+              selectedIssue.severity === 'CRITICAL' ? 'bg-gradient-to-r from-red-500 to-rose-600' :
+              selectedIssue.severity === 'HIGH' ? 'bg-gradient-to-r from-orange-500 to-amber-600' :
+              selectedIssue.severity === 'MEDIUM' ? 'bg-gradient-to-r from-yellow-500 to-amber-500' :
+              'bg-gradient-to-r from-blue-500 to-indigo-600'
+            } text-white`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {getSeverityIcon(selectedIssue.severity)}
+                  <span className="font-bold text-lg">{selectedIssue.severity}</span>
+                  <span className="px-2 py-0.5 bg-white/20 rounded text-sm">{selectedIssue.category}</span>
+                </div>
+                <button onClick={() => setSelectedIssue(null)} className="p-2 hover:bg-white/10 rounded-lg transition">
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-            )}
-            <div className="mt-6 flex justify-end gap-2">
-              <Link href={`/dashboard/projects/${projectId}/code-elements`} className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600">
-                <ExternalLink className="w-4 h-4" />
-                코드 요소에서 보기
-              </Link>
+            </div>
+            
+            {/* 본문 */}
+            <div className="p-6 space-y-4">
+              {/* 메시지 */}
+              <h3 className="text-xl font-semibold text-gray-900 dark:text-white leading-relaxed">
+                {selectedIssue.message}
+              </h3>
+              
+              {/* 파일 경로 */}
+              <div className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-900 rounded-xl">
+                <FileCode className="w-5 h-5 text-gray-400" />
+                <code className="flex-1 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  {selectedIssue.filePath}:{selectedIssue.lineNumber}
+                </code>
+                <button 
+                  onClick={() => {
+                    copyToClipboard(`${selectedIssue.filePath}:${selectedIssue.lineNumber}`);
+                    // 간단한 토스트 효과
+                    const btn = document.activeElement as HTMLButtonElement;
+                    btn.classList.add('text-green-500');
+                    setTimeout(() => btn.classList.remove('text-green-500'), 1000);
+                  }} 
+                  className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition" 
+                  title="경로 복사"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+              </div>
+              
+              {/* 제안 */}
+              {selectedIssue.suggestion && (
+                <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">💡</span>
+                    <span className="font-semibold text-blue-700 dark:text-blue-300">수정 제안</span>
+                  </div>
+                  <p className="text-blue-800 dark:text-blue-200 leading-relaxed">{selectedIssue.suggestion}</p>
+                </div>
+              )}
+              
+              {/* 메타 정보 */}
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                  <span className="text-gray-500">발견 일시</span>
+                  <p className="font-medium text-gray-900 dark:text-white mt-1">
+                    {new Date(selectedIssue.createdAt).toLocaleString('ko-KR')}
+                  </p>
+                </div>
+                <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                  <span className="text-gray-500">이슈 ID</span>
+                  <p className="font-mono text-xs text-gray-600 dark:text-gray-400 mt-1 truncate">
+                    {selectedIssue.id}
+                  </p>
+                </div>
+              </div>
+            </div>
+            
+            {/* 액션 버튼 */}
+            <div className="px-6 py-4 bg-gray-50 dark:bg-gray-900 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <Keyboard className="w-4 h-4" />
+                <span>ESC로 닫기</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => copyToClipboard(selectedIssue.message)}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+                >
+                  <Copy className="w-4 h-4" />
+                  메시지 복사
+                </button>
+                <Link 
+                  href={`/dashboard/projects/${projectId}/code-elements?file=${encodeURIComponent(selectedIssue.filePath)}`} 
+                  className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-lg hover:from-blue-600 hover:to-indigo-700 transition shadow-md"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  코드 보기
+                </Link>
+              </div>
             </div>
           </div>
         </div>
@@ -572,12 +638,17 @@ export default function ProjectResultsPage() {
             )}
           </div>
           {filteredIssues.length > 0 ? (
-            <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
-              {filteredIssues.map(issue => (
+            <div ref={listRef} className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
+              {filteredIssues.map((issue, index) => (
                 <div 
                   key={issue.id} 
-                  className="p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer"
-                  onClick={() => setSelectedIssue(issue)}
+                  className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-all ${
+                    selectedIndex === index ? 'ring-2 ring-blue-500 ring-inset bg-blue-50 dark:bg-blue-900/20' : ''
+                  }`}
+                  onClick={() => {
+                    setSelectedIssue(issue);
+                    setSelectedIndex(index);
+                  }}
                 >
                   <div className="flex items-start gap-3">
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${getSeverityColor(issue.severity)}`}>
