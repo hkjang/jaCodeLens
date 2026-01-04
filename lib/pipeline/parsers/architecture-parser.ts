@@ -105,8 +105,22 @@ export class ArchitectureParser {
   private checkDomainPurity(files: FileInfo[]): RuleViolation[] {
     const violations: RuleViolation[] = [];
 
+    // Next.js app 폴더 및 일반 UI 파일 제외 (프레임워크 사용이 당연함)
+    const excludedPatterns = [
+      /[\\/]app[\\/]/,           // Next.js app directory
+      /[\\/]pages[\\/]/,         // Next.js pages directory
+      /[\\/]components[\\/]/,    // Component files
+      /page\.tsx?$/,            // page files
+      /layout\.tsx?$/,          // layout files
+      /loading\.tsx?$/,         // loading files
+      /error\.tsx?$/,           // error files
+    ];
+
     for (const file of files) {
       if (!file.content) continue;
+
+      // 제외 패턴에 해당하면 도메인 순수성 검사 안함
+      if (excludedPatterns.some(p => p.test(file.path))) continue;
 
       const isDomain = ARCHITECTURE_PATTERNS.domain.test(file.path);
       if (!isDomain) continue;

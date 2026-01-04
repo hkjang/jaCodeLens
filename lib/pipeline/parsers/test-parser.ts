@@ -109,11 +109,18 @@ export class TestParser {
   }
 
   /**
-   * 테스트 파일 분석
+   * 테스트 파일 분석 - 실제 테스트 파일만 검사 (setup/config 제외)
    */
   private analyzeTestFile(file: FileInfo): RuleViolation[] {
     const violations: RuleViolation[] = [];
     if (!file.content) return violations;
+
+    // 실제 테스트 파일만 검사 (.test. 또는 .spec. 포함 파일)
+    // setup.ts, config.ts, helper.ts 등은 테스트 구조 검사에서 제외
+    const isActualTestFile = /\.(test|spec)\.\w+$/.test(file.path);
+    if (!isActualTestFile) {
+      return violations;  // setup, config, helper 파일은 검사 안함
+    }
 
     const lines = file.content.split('\n');
     let hasDescribe = false;
