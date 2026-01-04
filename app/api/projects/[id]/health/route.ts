@@ -55,26 +55,25 @@ export async function GET(
       if (r.severity === 'HIGH') categoryStats[key as keyof typeof categoryStats].high++;
     });
 
-    // Calculate scores using logarithmic scaling for better balance
-    // This prevents scores from dropping to 0 immediately when issue counts are high
+    // Calculate scores using logarithmic scaling - very lenient grading
+    // High issue counts are expected in active development projects
     const calcScore = (stats: { total: number; critical: number; high: number }) => {
       if (stats.total === 0) return 100;
       
-      // Weighted severity calculation
-      const weightedIssues = stats.critical * 3 + stats.high * 2 + (stats.total - stats.critical - stats.high);
+      // Weighted severity calculation (reduced weights)
+      const weightedIssues = stats.critical * 2 + stats.high * 1.5 + (stats.total - stats.critical - stats.high);
       
-      // Logarithmic scaling: score decreases more gradually as issues increase
-      // Base score of 100, reduced by log-scaled penalty
-      // log10(weightedIssues + 1) * 20 gives gradual reduction
-      const logPenalty = Math.log10(weightedIssues + 1) * 25;
+      // Very gentle logarithmic scaling
+      // Lower multiplier (15 instead of 25) for gradual score reduction
+      const logPenalty = Math.log10(weightedIssues + 1) * 15;
       
-      // Additional penalty for critical issues (max 30 points)
-      const criticalPenalty = Math.min(30, stats.critical * 10);
+      // Reduced penalty for critical issues (max 15 points instead of 30)
+      const criticalPenalty = Math.min(15, stats.critical * 5);
       
-      // Calculate final score
+      // Calculate final score with higher base
       const score = 100 - logPenalty - criticalPenalty;
       
-      return Math.max(0, Math.min(100, Math.round(score)));
+      return Math.max(20, Math.min(100, Math.round(score)));  // Minimum 20 points
     };
 
     const securityScore = calcScore(categoryStats.security);
@@ -83,21 +82,17 @@ export async function GET(
     const operationsScore = calcScore(categoryStats.operations);
     const testScore = calcScore(categoryStats.test);
 
-    // Adjusted weights: prioritize structure and security over high-issue categories
-    // Security: 25% (critical but fewer issues expected)
-    // Quality: 15% (many minor issues, less weight)
-    // Structure: 30% (architecture health is key)
-    // Operations: 15% (many minor issues, less weight)
-    // Test: 15% (coverage and test quality)
+    // Heavily prioritize structure (clean architecture is most valuable)
+    // Minimize impact of high-volume issue categories (quality, operations)
     const weightedScore = 
       securityScore * 0.25 + 
-      qualityScore * 0.15 + 
-      structureScore * 0.30 + 
-      operationsScore * 0.15 + 
-      testScore * 0.15;
+      qualityScore * 0.10 +  // Reduced from 15%
+      structureScore * 0.35 + // Increased from 30%
+      operationsScore * 0.10 + // Reduced from 15%
+      testScore * 0.20;  // Increased from 15%
     
-    // Add floor bonus and cap at 100
-    const overallScore = Math.min(100, Math.round(weightedScore + 10));
+    // Large floor bonus (20 points) to ensure reasonable scores
+    const overallScore = Math.min(100, Math.round(weightedScore + 20));
 
     // Get historical executions for trend
     const historicalExecutions = await prisma.analysisExecute.findMany({
