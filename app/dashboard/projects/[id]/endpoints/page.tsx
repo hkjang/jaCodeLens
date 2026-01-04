@@ -39,6 +39,29 @@ import {
   Zap
 } from 'lucide-react';
 
+interface ApiParameter {
+  name: string;
+  type: string;
+  required: boolean;
+  defaultValue?: string;
+  description?: string;
+  in: 'path' | 'query' | 'body' | 'header';
+}
+
+interface ApiRequestBody {
+  contentType: string;
+  schema?: string;
+  example?: string;
+  required: boolean;
+}
+
+interface ApiResponse {
+  statusCode: number;
+  contentType?: string;
+  schema?: string;
+  description?: string;
+}
+
 interface ApiEndpoint {
   id: string;
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS' | 'HEAD';
@@ -47,11 +70,32 @@ interface ApiEndpoint {
   fileName: string;
   handler: string;
   params: string[];
+  parameters?: ApiParameter[];
+  requestBody?: ApiRequestBody;
+  responses?: ApiResponse[];
   middleware?: string[];
   description?: string;
+  summary?: string;
   isAsync: boolean;
   lineNumber: number;
   framework: string;
+  auth?: string;
+  deprecated?: boolean;
+  tags?: string[];
+  contentType?: string;
+  validation?: {
+    rules: { field: string; rule: string; message?: string }[];
+    schema?: string;
+  };
+  rateLimit?: {
+    limit: number;
+    window: string;
+  };
+  cache?: {
+    ttl?: number;
+    strategy?: string;
+  };
+  apiVersion?: string;
 }
 
 interface ApiGroup {
@@ -782,10 +826,216 @@ export default function ApiEndpointsPage() {
                 
                 <div>
                   <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">프레임워크</h4>
-                  <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-sm rounded uppercase">
-                    {selectedEndpoint.framework}
-                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-sm rounded uppercase">
+                      {selectedEndpoint.framework}
+                    </span>
+                    {selectedEndpoint.apiVersion && (
+                      <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 text-xs rounded">
+                        {selectedEndpoint.apiVersion}
+                      </span>
+                    )}
+                    {selectedEndpoint.deprecated && (
+                      <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs rounded">
+                        Deprecated
+                      </span>
+                    )}
+                  </div>
                 </div>
+                
+                {/* 인증 정보 */}
+                {selectedEndpoint.auth && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">인증</h4>
+                    <span className={`px-2 py-1 text-xs rounded ${
+                      selectedEndpoint.auth === 'none' 
+                        ? 'bg-green-100 dark:bg-green-900/30 text-green-600' 
+                        : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600'
+                    }`}>
+                      <Lock className="w-3 h-3 inline mr-1" />
+                      {selectedEndpoint.auth.toUpperCase()}
+                    </span>
+                  </div>
+                )}
+                
+                {/* 상세 파라미터 테이블 */}
+                {selectedEndpoint.parameters && selectedEndpoint.parameters.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">파라미터 상세</h4>
+                    <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead className="bg-gray-50 dark:bg-gray-800">
+                          <tr>
+                            <th className="px-2 py-1.5 text-left font-medium text-gray-500">이름</th>
+                            <th className="px-2 py-1.5 text-left font-medium text-gray-500">타입</th>
+                            <th className="px-2 py-1.5 text-left font-medium text-gray-500">위치</th>
+                            <th className="px-2 py-1.5 text-center font-medium text-gray-500">필수</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                          {selectedEndpoint.parameters.map((param, idx) => (
+                            <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                              <td className="px-2 py-1.5 font-mono text-blue-600 dark:text-blue-400">{param.name}</td>
+                              <td className="px-2 py-1.5 text-gray-600 dark:text-gray-400">{param.type}</td>
+                              <td className="px-2 py-1.5">
+                                <span className={`px-1.5 py-0.5 rounded text-xs ${
+                                  param.in === 'path' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                                  param.in === 'query' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                                  param.in === 'header' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' :
+                                  'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                                }`}>
+                                  {param.in}
+                                </span>
+                              </td>
+                              <td className="px-2 py-1.5 text-center">
+                                {param.required ? (
+                                  <span className="text-red-500">✓</span>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+                
+                {/* 요청 바디 */}
+                {selectedEndpoint.requestBody && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">요청 바디</h4>
+                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Content-Type:</span>
+                        <code className="text-xs bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded">
+                          {selectedEndpoint.requestBody.contentType}
+                        </code>
+                        {selectedEndpoint.requestBody.required && (
+                          <span className="text-xs text-red-500">필수</span>
+                        )}
+                      </div>
+                      {selectedEndpoint.requestBody.schema && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500">스키마:</span>
+                          <code className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded">
+                            {selectedEndpoint.requestBody.schema}
+                          </code>
+                        </div>
+                      )}
+                      {selectedEndpoint.requestBody.example && (
+                        <div>
+                          <span className="text-xs text-gray-500">예제:</span>
+                          <pre className="mt-1 text-xs bg-gray-900 text-green-400 p-2 rounded overflow-x-auto">
+                            {selectedEndpoint.requestBody.example}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                {/* 응답 정보 */}
+                {selectedEndpoint.responses && selectedEndpoint.responses.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">응답</h4>
+                    <div className="space-y-1">
+                      {selectedEndpoint.responses.map((resp, idx) => (
+                        <div key={idx} className="flex items-center gap-2 text-xs">
+                          <span className={`px-1.5 py-0.5 rounded font-mono ${
+                            resp.statusCode >= 200 && resp.statusCode < 300 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                            resp.statusCode >= 400 && resp.statusCode < 500 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                            resp.statusCode >= 500 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                            'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-400'
+                          }`}>
+                            {resp.statusCode}
+                          </span>
+                          <span className="text-gray-600 dark:text-gray-400">{resp.description}</span>
+                          {resp.contentType && (
+                            <code className="text-gray-400">{resp.contentType}</code>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* 유효성 검증 */}
+                {selectedEndpoint.validation && selectedEndpoint.validation.rules.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">유효성 검증</h4>
+                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-2 space-y-1">
+                      {selectedEndpoint.validation.schema && (
+                        <div className="text-xs text-gray-500 mb-2">
+                          스키마: <code className="text-purple-600">{selectedEndpoint.validation.schema}</code>
+                        </div>
+                      )}
+                      {selectedEndpoint.validation.rules.slice(0, 5).map((rule, idx) => (
+                        <div key={idx} className="text-xs flex items-center gap-2">
+                          <span className="font-mono text-blue-600 dark:text-blue-400">{rule.field}</span>
+                          <span className="text-gray-400">→</span>
+                          <code className="text-gray-600 dark:text-gray-400">{rule.rule}</code>
+                        </div>
+                      ))}
+                      {selectedEndpoint.validation.rules.length > 5 && (
+                        <div className="text-xs text-gray-400">
+                          +{selectedEndpoint.validation.rules.length - 5}개 더...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                {/* 레이트 리밋 & 캐시 */}
+                {(selectedEndpoint.rateLimit || selectedEndpoint.cache) && (
+                  <div className="flex gap-4">
+                    {selectedEndpoint.rateLimit && (
+                      <div className="flex-1 bg-orange-50 dark:bg-orange-900/20 rounded-lg p-2">
+                        <div className="text-xs text-orange-600 dark:text-orange-400 font-medium mb-1">레이트 리밋</div>
+                        <div className="text-sm text-orange-800 dark:text-orange-300">
+                          {selectedEndpoint.rateLimit.limit}/{selectedEndpoint.rateLimit.window}
+                        </div>
+                      </div>
+                    )}
+                    {selectedEndpoint.cache && (
+                      <div className="flex-1 bg-cyan-50 dark:bg-cyan-900/20 rounded-lg p-2">
+                        <div className="text-xs text-cyan-600 dark:text-cyan-400 font-medium mb-1">캐시</div>
+                        <div className="text-sm text-cyan-800 dark:text-cyan-300">
+                          {selectedEndpoint.cache.ttl ? `TTL: ${selectedEndpoint.cache.ttl}s` : selectedEndpoint.cache.strategy}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* 미들웨어 */}
+                {selectedEndpoint.middleware && selectedEndpoint.middleware.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">미들웨어</h4>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedEndpoint.middleware.map((mw, idx) => (
+                        <span key={idx} className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs rounded">
+                          {mw}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* 태그 */}
+                {selectedEndpoint.tags && selectedEndpoint.tags.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">태그</h4>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedEndpoint.tags.map((tag, idx) => (
+                        <span key={idx} className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 text-xs rounded">
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 
                 <div className="pt-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
                   <button

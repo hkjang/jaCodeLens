@@ -2408,3 +2408,496 @@ export async function GET(
     }, { status: 200 });
   }
 }
+
+// ===== 생성 유틸리티 함수들 =====
+
+// OpenAPI 3.0 스펙 생성
+function generateOpenApiSpec(endpoints: ApiEndpoint[], projectName: string): object {
+  const paths: Record<string, Record<string, object>> = {};
+  const tags = new Set<string>();
+  
+  for (const ep of endpoints) {
+    const path = ep.path.replace(/:(\w+)/g, '{$1}');
+    if (!paths[path]) paths[path] = {};
+    
+    // 태그 추출
+    const pathParts = ep.path.split('/').filter(Boolean);
+    const tag = pathParts[0] || 'default';
+    tags.add(tag);
+    
+    // 파라미터 생성
+    const parameters: object[] = [];
+    
+    // Path 파라미터
+    for (const param of ep.params) {
+      parameters.push({
+        name: param,
+        in: 'path',
+        required: true,
+        schema: { type: 'string' },
+      });
+    }
+    
+    // Query/Header 파라미터
+    if (ep.parameters) {
+      for (const p of ep.parameters) {
+        if (p.in !== 'body') {
+          parameters.push({
+            name: p.name,
+            in: p.in,
+            required: p.required,
+            schema: { type: mapTypeToOpenApi(p.type) },
+            description: p.description,
+          });
+        }
+      }
+    }
+    
+    // Request Body
+    let requestBody = undefined;
+    if (ep.requestBody) {
+      requestBody = {
+        required: ep.requestBody.required,
+        content: {
+          [ep.requestBody.contentType]: {
+            schema: ep.requestBody.schema 
+              ? { $ref: `#/components/schemas/${ep.requestBody.schema}` }
+              : { type: 'object' },
+            example: ep.requestBody.example,
+          },
+        },
+      };
+    }
+    
+    // Responses
+    const responses: Record<string, object> = {};
+    if (ep.responses && ep.responses.length > 0) {
+      for (const r of ep.responses) {
+        responses[String(r.statusCode)] = {
+          description: r.description || `${r.statusCode} response`,
+          content: r.contentType ? {
+            [r.contentType]: {
+              schema: r.schema ? { $ref: `#/components/schemas/${r.schema}` } : { type: 'object' },
+            },
+          } : undefined,
+        };
+      }
+    } else {
+      responses['200'] = { description: 'Successful response' };
+    }
+    
+    paths[path][ep.method.toLowerCase()] = {
+      operationId: ep.operationId || `${ep.method.toLowerCase()}_${ep.handler}`,
+      summary: ep.summary || ep.description,
+      description: ep.description,
+      tags: ep.tags || [tag],
+      deprecated: ep.deprecated,
+      parameters: parameters.length > 0 ? parameters : undefined,
+      requestBody,
+      responses,
+      security: ep.auth ? [{ [ep.auth]: [] }] : undefined,
+    };
+  }
+  
+  return {
+    openapi: '3.0.3',
+    info: {
+      title: `${projectName} API`,
+      version: '1.0.0',
+      description: `Auto-generated API documentation for ${projectName}`,
+    },
+    servers: [
+      { url: 'http://localhost:3000', description: 'Development' },
+    ],
+    tags: Array.from(tags).map(t => ({ name: t })),
+    paths,
+    components: {
+      securitySchemes: {
+        jwt: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        apikey: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
+        bearer: { type: 'http', scheme: 'bearer' },
+        basic: { type: 'http', scheme: 'basic' },
+      },
+    },
+  };
+}
+
+// 타입을 OpenAPI 타입으로 매핑
+function mapTypeToOpenApi(type: string): string {
+  const typeMap: Record<string, string> = {
+    'string': 'string', 'String': 'string',
+    'int': 'integer', 'Integer': 'integer', 'number': 'integer',
+    'long': 'integer', 'Long': 'integer',
+    'float': 'number', 'double': 'number', 'Double': 'number',
+    'boolean': 'boolean', 'Boolean': 'boolean', 'bool': 'boolean',
+    'array': 'array', 'list': 'array', 'List': 'array',
+    'object': 'object', 'Object': 'object',
+    'File': 'string',
+  };
+  return typeMap[type] || 'string';
+}
+
+// cURL 명령어 생성
+function generateCurlCommand(endpoint: ApiEndpoint, baseUrl: string = 'http://localhost:3000'): string {
+  const path = endpoint.path.replace(/:(\w+)/g, '{$1}');
+  const url = `${baseUrl}${path}`;
+  
+  const parts: string[] = ['curl'];
+  
+  // Method
+  if (endpoint.method !== 'GET') {
+    parts.push(`-X ${endpoint.method}`);
+  }
+  
+  // Headers
+  if (endpoint.requestBody?.contentType) {
+    parts.push(`-H 'Content-Type: ${endpoint.requestBody.contentType}'`);
+  }
+  
+  if (endpoint.auth) {
+    switch (endpoint.auth) {
+      case 'bearer':
+      case 'jwt':
+        parts.push(`-H 'Authorization: Bearer YOUR_TOKEN'`);
+        break;
+      case 'apikey':
+        parts.push(`-H 'X-API-Key: YOUR_API_KEY'`);
+        break;
+      case 'basic':
+        parts.push(`-u 'username:password'`);
+        break;
+    }
+  }
+  
+  // Body
+  if (endpoint.requestBody && ['POST', 'PUT', 'PATCH'].includes(endpoint.method)) {
+    if (endpoint.requestBody.contentType === 'application/json') {
+      const bodyFields: Record<string, string> = {};
+      if (endpoint.parameters) {
+        for (const p of endpoint.parameters) {
+          if (p.in === 'body') {
+            bodyFields[p.name] = `<${p.type}>`;
+          }
+        }
+      }
+      const bodyJson = Object.keys(bodyFields).length > 0 
+        ? JSON.stringify(bodyFields, null, 2)
+        : '{}';
+      parts.push(`-d '${bodyJson}'`);
+    } else if (endpoint.requestBody.contentType === 'multipart/form-data') {
+      if (endpoint.parameters) {
+        for (const p of endpoint.parameters) {
+          if (p.in === 'body' && p.type === 'File') {
+            parts.push(`-F '${p.name}=@/path/to/file'`);
+          } else if (p.in === 'body') {
+            parts.push(`-F '${p.name}=value'`);
+          }
+        }
+      }
+    }
+  }
+  
+  // Query params
+  let urlWithQuery = url;
+  if (endpoint.parameters) {
+    const queryParams = endpoint.parameters.filter(p => p.in === 'query');
+    if (queryParams.length > 0) {
+      const queryString = queryParams.map(p => `${p.name}=value`).join('&');
+      urlWithQuery = `${url}?${queryString}`;
+    }
+  }
+  
+  parts.push(`'${urlWithQuery}'`);
+  
+  return parts.join(' \\\n  ');
+}
+
+// Postman Collection 생성
+function generatePostmanCollection(endpoints: ApiEndpoint[], projectName: string): object {
+  const items: object[] = [];
+  const folders = new Map<string, object[]>();
+  
+  for (const ep of endpoints) {
+    const pathParts = ep.path.split('/').filter(Boolean);
+    const folderName = pathParts[0] || 'root';
+    
+    if (!folders.has(folderName)) {
+      folders.set(folderName, []);
+    }
+    
+    // Request 생성
+    const request: Record<string, unknown> = {
+      method: ep.method,
+      header: [],
+      url: {
+        raw: `{{baseUrl}}${ep.path}`,
+        host: ['{{baseUrl}}'],
+        path: ep.path.split('/').filter(Boolean).map(p => p.startsWith(':') ? `:${p.slice(1)}` : p),
+        variable: ep.params.map(p => ({ key: p, value: '' })),
+      },
+    };
+    
+    // Headers
+    const headers: object[] = [];
+    if (ep.requestBody?.contentType) {
+      headers.push({ key: 'Content-Type', value: ep.requestBody.contentType });
+    }
+    if (ep.auth === 'bearer' || ep.auth === 'jwt') {
+      headers.push({ key: 'Authorization', value: 'Bearer {{token}}' });
+    } else if (ep.auth === 'apikey') {
+      headers.push({ key: 'X-API-Key', value: '{{apiKey}}' });
+    }
+    request.header = headers;
+    
+    // Body
+    if (ep.requestBody && ['POST', 'PUT', 'PATCH'].includes(ep.method)) {
+      if (ep.requestBody.contentType === 'application/json') {
+        const bodyObj: Record<string, string> = {};
+        if (ep.parameters) {
+          for (const p of ep.parameters) {
+            if (p.in === 'body') {
+              bodyObj[p.name] = '';
+            }
+          }
+        }
+        request.body = {
+          mode: 'raw',
+          raw: JSON.stringify(bodyObj, null, 2),
+          options: { raw: { language: 'json' } },
+        };
+      } else if (ep.requestBody.contentType === 'multipart/form-data') {
+        const formdata: object[] = [];
+        if (ep.parameters) {
+          for (const p of ep.parameters) {
+            if (p.in === 'body') {
+              formdata.push({
+                key: p.name,
+                type: p.type === 'File' ? 'file' : 'text',
+                value: '',
+              });
+            }
+          }
+        }
+        request.body = { mode: 'formdata', formdata };
+      }
+    }
+    
+    // Query params
+    if (ep.parameters) {
+      const queryParams = ep.parameters.filter(p => p.in === 'query');
+      if (queryParams.length > 0) {
+        (request.url as Record<string, unknown>).query = queryParams.map(p => ({
+          key: p.name,
+          value: '',
+          disabled: !p.required,
+        }));
+      }
+    }
+    
+    const item = {
+      name: `${ep.method} ${ep.path}`,
+      request,
+      response: [],
+    };
+    
+    folders.get(folderName)!.push(item);
+  }
+  
+  // 폴더 구조로 변환
+  for (const [name, folderItems] of folders) {
+    items.push({
+      name,
+      item: folderItems,
+    });
+  }
+  
+  return {
+    info: {
+      name: `${projectName} API`,
+      schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
+    },
+    variable: [
+      { key: 'baseUrl', value: 'http://localhost:3000' },
+      { key: 'token', value: '' },
+      { key: 'apiKey', value: '' },
+    ],
+    item: items,
+  };
+}
+
+// GraphQL 엔드포인트 감지
+function parseGraphQLEndpoints(projectPath: string): ApiEndpoint[] {
+  const endpoints: ApiEndpoint[] = [];
+  
+  function scanDir(dir: string, depth: number = 0) {
+    if (depth > 6) return;
+    
+    try {
+      if (!existsSync(dir)) return;
+      const entries = readdirSync(dir);
+      
+      for (const entry of entries) {
+        if (['node_modules', '.git', 'dist', 'build'].includes(entry)) continue;
+        
+        const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        
+        if (stat.isDirectory()) {
+          scanDir(fullPath, depth + 1);
+        } else if (entry.endsWith('.graphql') || entry.endsWith('.gql') || entry.includes('schema') || entry.includes('resolver')) {
+          try {
+            const content = readFileSync(fullPath, 'utf-8');
+            const relativePath = relative(projectPath, fullPath);
+            
+            // Query 감지
+            const queryMatches = content.matchAll(/type\s+Query\s*\{([^}]+)\}/g);
+            for (const m of queryMatches) {
+              const queries = m[1].matchAll(/(\w+)\s*(?:\(([^)]*)\))?\s*:\s*([^\n]+)/g);
+              for (const q of queries) {
+                endpoints.push({
+                  id: `QUERY-${q[1]}`,
+                  method: 'POST',
+                  path: '/graphql',
+                  filePath: relativePath,
+                  fileName: entry,
+                  handler: q[1],
+                  params: [],
+                  description: `GraphQL Query: ${q[1]}`,
+                  responseType: q[3].trim(),
+                  isAsync: true,
+                  lineNumber: 1,
+                  framework: 'graphql',
+                  tags: ['GraphQL', 'Query'],
+                });
+              }
+            }
+            
+            // Mutation 감지
+            const mutationMatches = content.matchAll(/type\s+Mutation\s*\{([^}]+)\}/g);
+            for (const m of mutationMatches) {
+              const mutations = m[1].matchAll(/(\w+)\s*(?:\(([^)]*)\))?\s*:\s*([^\n]+)/g);
+              for (const q of mutations) {
+                endpoints.push({
+                  id: `MUTATION-${q[1]}`,
+                  method: 'POST',
+                  path: '/graphql',
+                  filePath: relativePath,
+                  fileName: entry,
+                  handler: q[1],
+                  params: [],
+                  description: `GraphQL Mutation: ${q[1]}`,
+                  responseType: q[3].trim(),
+                  isAsync: true,
+                  lineNumber: 1,
+                  framework: 'graphql',
+                  tags: ['GraphQL', 'Mutation'],
+                });
+              }
+            }
+            
+            // Subscription 감지
+            const subscriptionMatches = content.matchAll(/type\s+Subscription\s*\{([^}]+)\}/g);
+            for (const m of subscriptionMatches) {
+              const subs = m[1].matchAll(/(\w+)\s*(?:\(([^)]*)\))?\s*:\s*([^\n]+)/g);
+              for (const q of subs) {
+                endpoints.push({
+                  id: `SUBSCRIPTION-${q[1]}`,
+                  method: 'POST',
+                  path: '/graphql',
+                  filePath: relativePath,
+                  fileName: entry,
+                  handler: q[1],
+                  params: [],
+                  description: `GraphQL Subscription: ${q[1]}`,
+                  responseType: q[3].trim(),
+                  isAsync: true,
+                  lineNumber: 1,
+                  framework: 'graphql',
+                  tags: ['GraphQL', 'Subscription'],
+                });
+              }
+            }
+            
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+  }
+  
+  scanDir(projectPath);
+  return endpoints;
+}
+
+// WebSocket 엔드포인트 감지
+function parseWebSocketEndpoints(projectPath: string): ApiEndpoint[] {
+  const endpoints: ApiEndpoint[] = [];
+  
+  function scanDir(dir: string, depth: number = 0) {
+    if (depth > 6) return;
+    
+    try {
+      if (!existsSync(dir)) return;
+      const entries = readdirSync(dir);
+      
+      for (const entry of entries) {
+        if (['node_modules', '.git', 'dist', 'build'].includes(entry)) continue;
+        
+        const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        
+        if (stat.isDirectory()) {
+          scanDir(fullPath, depth + 1);
+        } else if (['.ts', '.js', '.py', '.java', '.go'].some(ext => entry.endsWith(ext))) {
+          try {
+            const content = readFileSync(fullPath, 'utf-8');
+            const relativePath = relative(projectPath, fullPath);
+            
+            // Socket.io
+            const socketioMatches = content.matchAll(/(?:io|socket)\.on\s*\(\s*['"](\w+)['"]/g);
+            for (const m of socketioMatches) {
+              if (!['connection', 'disconnect', 'error'].includes(m[1])) {
+                endpoints.push({
+                  id: `WS-${m[1]}`,
+                  method: 'GET', // WebSocket upgrade
+                  path: `/socket.io/${m[1]}`,
+                  filePath: relativePath,
+                  fileName: entry,
+                  handler: m[1],
+                  params: [],
+                  description: `WebSocket Event: ${m[1]}`,
+                  isAsync: true,
+                  lineNumber: 1,
+                  framework: 'socket.io',
+                  tags: ['WebSocket'],
+                });
+              }
+            }
+            
+            // ws library
+            if (content.includes('new WebSocket') || content.includes('new WebSocketServer') || content.includes('ws.Server')) {
+              const wsPath = content.match(/path:\s*['"]([^'"]+)['"]/);
+              endpoints.push({
+                id: `WS-server`,
+                method: 'GET',
+                path: wsPath ? wsPath[1] : '/ws',
+                filePath: relativePath,
+                fileName: entry,
+                handler: 'WebSocketServer',
+                params: [],
+                description: 'WebSocket Server',
+                isAsync: true,
+                lineNumber: 1,
+                framework: 'websocket',
+                tags: ['WebSocket'],
+              });
+            }
+            
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+  }
+  
+  scanDir(projectPath);
+  return endpoints;
+}
