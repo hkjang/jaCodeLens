@@ -101,6 +101,39 @@ interface ApiEndpoint {
     hasPagination: boolean;
     estimatedLatency?: 'low' | 'medium' | 'high';
   };
+  // 추가 분석 메타데이터 (Enhanced v2)
+  namingConvention?: {
+    followsRESTful: boolean;
+    usesKebabCase: boolean;
+    usesCamelCase: boolean;
+    usesSnakeCase: boolean;
+    issues: string[];
+    score: number; // 0-100
+  };
+  testCoverage?: {
+    hasUnitTest: boolean;
+    hasIntegrationTest: boolean;
+    hasE2ETest: boolean;
+    testFilePath?: string;
+  };
+  consistency?: {
+    responseFormat: 'json' | 'xml' | 'html' | 'mixed' | 'unknown';
+    errorHandling: 'consistent' | 'inconsistent' | 'unknown';
+    versioningStyle: 'path' | 'header' | 'query' | 'none';
+  };
+  healthScore?: {
+    overall: number; // 0-100
+    security: number;
+    documentation: number;
+    performance: number;
+    naming: number;
+  };
+  // 변경 이력 추적
+  changeRisk?: {
+    level: 'low' | 'medium' | 'high';
+    breakingChangeRisk: boolean;
+    dependentEndpoints: string[];
+  };
 }
 
 interface ApiGroup {
@@ -1135,8 +1168,314 @@ function enrichEndpointWithAnalysis(
   endpoint.documentationScore = calculateDocumentationScore(content, startIndex, endpoint);
   endpoint.securityAnalysis = analyzeSecurityIssues(content, startIndex, endpoint);
   endpoint.performance = analyzePerformance(content, startIndex, endpoint);
+  endpoint.namingConvention = analyzeNamingConvention(endpoint);
+  endpoint.consistency = analyzeConsistency(content, startIndex, endpoint);
+  endpoint.healthScore = calculateHealthScore(endpoint);
   
   return endpoint;
+}
+
+// 네이밍 컨벤션 분석
+function analyzeNamingConvention(endpoint: Partial<ApiEndpoint>): ApiEndpoint['namingConvention'] {
+  const issues: string[] = [];
+  let score = 100;
+  
+  const path = endpoint.path || '';
+  const pathParts = path.split('/').filter(p => p && !p.startsWith(':') && !p.startsWith('{'));
+  
+  // RESTful 분석
+  const restfulResources = ['users', 'posts', 'items', 'products', 'orders', 'comments', 'categories', 'tags', 'files', 'images', 'documents', 'messages', 'notifications', 'settings', 'profiles', 'accounts'];
+  const hasResourceNoun = pathParts.some(p => {
+    const singular = p.replace(/s$/, '');
+    return restfulResources.includes(p) || restfulResources.includes(singular) || /^[a-z]+s$/.test(p);
+  });
+  
+  // HTTP 메서드와 경로 일관성 체크
+  const method = endpoint.method || 'GET';
+  const lastPathPart = pathParts[pathParts.length - 1] || '';
+  
+  // 동사가 URL에 포함되어 있는지 체크 (RESTful 안티패턴)
+  const verbPatterns = /\/(get|create|update|delete|add|remove|edit|fetch|save|load|find|search|list)/i;
+  const hasVerbInPath = verbPatterns.test(path);
+  if (hasVerbInPath) {
+    issues.push('URL에 동사 사용 (RESTful 권장: HTTP 메서드로 동작 표현)');
+    score -= 15;
+  }
+  
+  // 케이스 분석
+  const usesKebabCase = pathParts.some(p => /^[a-z]+(-[a-z]+)+$/.test(p));
+  const usesCamelCase = pathParts.some(p => /^[a-z]+[A-Z][a-z]+/.test(p));
+  const usesSnakeCase = pathParts.some(p => /^[a-z]+(_[a-z]+)+$/.test(p));
+  
+  // 혼합 케이스 사용 체크
+  const caseTypes = [usesKebabCase, usesCamelCase, usesSnakeCase].filter(Boolean).length;
+  if (caseTypes > 1) {
+    issues.push('URL에 혼합 케이스 사용 (일관된 케이스 권장)');
+    score -= 10;
+  }
+  
+  // camelCase in URL (비권장)
+  if (usesCamelCase) {
+    issues.push('URL에 camelCase 사용 (kebab-case 권장)');
+    score -= 5;
+  }
+  
+  // 대문자 사용 체크
+  if (/[A-Z]/.test(path)) {
+    issues.push('URL에 대문자 사용 (소문자 권장)');
+    score -= 5;
+  }
+  
+  // 파일 확장자 체크
+  if (/\.(json|xml|html)$/i.test(path)) {
+    issues.push('URL에 파일 확장자 포함 (Content-Type 헤더 사용 권장)');
+    score -= 5;
+  }
+  
+  // 너무 깊은 중첩 체크
+  if (pathParts.length > 5) {
+    issues.push('URL 경로가 너무 깊음 (5단계 이하 권장)');
+    score -= 10;
+  }
+  
+  // ID 파라미터 위치 체크 (리소스 바로 뒤에 와야 함)
+  const pathParams = (path.match(/:[a-zA-Z]+|\{[a-zA-Z]+\}/g) || []);
+  const followsRESTful = hasResourceNoun && pathParams.length <= 2 && !hasVerbInPath;
+  
+  // 복수형 사용 체크
+  if (pathParts.some(p => /^[a-z]+$/.test(p) && !p.endsWith('s') && p !== 'auth' && p !== 'api' && p !== 'v1' && p !== 'v2')) {
+    issues.push('컬렉션 리소스에 복수형 권장');
+    score -= 5;
+  }
+  
+  return {
+    followsRESTful,
+    usesKebabCase,
+    usesCamelCase,
+    usesSnakeCase,
+    issues,
+    score: Math.max(0, score),
+  };
+}
+
+// 테스트 커버리지 분석
+function analyzeTestCoverage(projectPath: string, endpoint: Partial<ApiEndpoint>): ApiEndpoint['testCoverage'] {
+  const handler = endpoint.handler || '';
+  const path = endpoint.path || '';
+  const filePath = endpoint.filePath || '';
+  
+  // 테스트 파일 패턴
+  const testPatterns = [
+    // JavaScript/TypeScript
+    `**/*.test.ts`, `**/*.test.js`, `**/*.spec.ts`, `**/*.spec.js`,
+    `__tests__/**/*.ts`, `__tests__/**/*.js`,
+    // Python
+    `**/test_*.py`, `**/*_test.py`, `tests/**/*.py`,
+    // Java
+    `**/Test*.java`, `**/*Test.java`, `**/*Tests.java`,
+    // Go
+    `**/*_test.go`,
+  ];
+  
+  let hasUnitTest = false;
+  let hasIntegrationTest = false;
+  let hasE2ETest = false;
+  let testFilePath: string | undefined;
+  
+  // 간단한 휴리스틱: 테스트 디렉토리에 관련 파일이 있는지 확인
+  const possibleTestDirs = ['__tests__', 'tests', 'test', 'spec', 'specs'];
+  const pathSegments = filePath.replace(/\\/g, '/').split('/');
+  const fileName = pathSegments[pathSegments.length - 1] || '';
+  const baseName = fileName.replace(/\.(ts|js|tsx|jsx|py|java|go|rb|php|rs)$/, '');
+  
+  for (const testDir of possibleTestDirs) {
+    const testDirPath = join(projectPath, testDir);
+    if (existsSync(testDirPath)) {
+      // 단위 테스트
+      const unitTestPath = join(testDirPath, `${baseName}.test.ts`);
+      const unitTestPath2 = join(testDirPath, `${baseName}.spec.ts`);
+      if (existsSync(unitTestPath) || existsSync(unitTestPath2)) {
+        hasUnitTest = true;
+        testFilePath = existsSync(unitTestPath) ? unitTestPath : unitTestPath2;
+      }
+      
+      // 통합 테스트
+      const integrationPath = join(testDirPath, 'integration');
+      if (existsSync(integrationPath)) {
+        hasIntegrationTest = true;
+      }
+      
+      // E2E 테스트
+      const e2ePath = join(testDirPath, 'e2e');
+      const e2ePath2 = join(projectPath, 'e2e');
+      const cypressPath = join(projectPath, 'cypress');
+      const playwrightPath = join(projectPath, 'playwright');
+      if (existsSync(e2ePath) || existsSync(e2ePath2) || existsSync(cypressPath) || existsSync(playwrightPath)) {
+        hasE2ETest = true;
+      }
+    }
+  }
+  
+  return {
+    hasUnitTest,
+    hasIntegrationTest,
+    hasE2ETest,
+    testFilePath,
+  };
+}
+
+// 일관성 분석
+function analyzeConsistency(content: string, startIndex: number, endpoint: Partial<ApiEndpoint>): ApiEndpoint['consistency'] {
+  const funcContent = content.substring(startIndex, startIndex + 2000);
+  
+  // 응답 포맷 감지
+  let responseFormat: 'json' | 'xml' | 'html' | 'mixed' | 'unknown' = 'unknown';
+  if (funcContent.match(/\.json\(|NextResponse\.json|JSONResponse|application\/json|res\.json/gi)) {
+    responseFormat = 'json';
+  } else if (funcContent.match(/\.xml\(|application\/xml|text\/xml/gi)) {
+    responseFormat = 'xml';
+  } else if (funcContent.match(/\.html\(|text\/html|render\(/gi)) {
+    responseFormat = 'html';
+  }
+  
+  // 에러 핸들링 일관성
+  const hasTryCatch = funcContent.includes('try') && funcContent.includes('catch');
+  const hasErrorMiddleware = funcContent.match(/errorHandler|handleError|catchAsync/gi);
+  const hasCustomErrorClass = funcContent.match(/throw new \w+Error|throw new HttpException/gi);
+  const errorHandling: 'consistent' | 'inconsistent' | 'unknown' = 
+    (hasTryCatch && (hasErrorMiddleware || hasCustomErrorClass)) ? 'consistent' :
+    hasTryCatch ? 'inconsistent' : 'unknown';
+  
+  // 버저닝 스타일 감지
+  const path = endpoint.path || '';
+  let versioningStyle: 'path' | 'header' | 'query' | 'none' = 'none';
+  if (/\/v\d+\//i.test(path)) {
+    versioningStyle = 'path';
+  } else if (funcContent.match(/Accept-Version|X-API-Version|api-version/gi)) {
+    versioningStyle = 'header';
+  } else if (funcContent.match(/\?.*version=|apiVersion=/gi)) {
+    versioningStyle = 'query';
+  }
+  
+  return {
+    responseFormat,
+    errorHandling,
+    versioningStyle,
+  };
+}
+
+// API 헬스 스코어 계산
+function calculateHealthScore(endpoint: Partial<ApiEndpoint>): ApiEndpoint['healthScore'] {
+  // 보안 점수 (0-100)
+  let securityScore = 100;
+  if (endpoint.securityAnalysis) {
+    const sa = endpoint.securityAnalysis;
+    if (!sa.hasAuth && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(endpoint.method || '')) {
+      securityScore -= 30;
+    }
+    if (!sa.hasInputValidation && endpoint.requestBody) {
+      securityScore -= 20;
+    }
+    if (!sa.hasRateLimit && endpoint.method === 'POST') {
+      securityScore -= 10;
+    }
+    for (const issue of sa.issues) {
+      switch (issue.severity) {
+        case 'critical': securityScore -= 25; break;
+        case 'high': securityScore -= 15; break;
+        case 'medium': securityScore -= 10; break;
+        case 'low': securityScore -= 5; break;
+      }
+    }
+  }
+  securityScore = Math.max(0, securityScore);
+  
+  // 문서화 점수
+  const documentationScore = endpoint.documentationScore?.score || 0;
+  
+  // 성능 점수
+  let performanceScore = 70; // 기본 점수
+  if (endpoint.performance) {
+    if (endpoint.performance.hasCaching) performanceScore += 10;
+    if (endpoint.performance.hasPagination) performanceScore += 10;
+    if (endpoint.performance.estimatedLatency === 'low') performanceScore += 10;
+    else if (endpoint.performance.estimatedLatency === 'high') performanceScore -= 20;
+  }
+  performanceScore = Math.min(100, Math.max(0, performanceScore));
+  
+  // 네이밍 점수
+  const namingScore = endpoint.namingConvention?.score || 70;
+  
+  // 전체 점수 (가중 평균)
+  const overall = Math.round(
+    securityScore * 0.35 + 
+    documentationScore * 0.25 + 
+    performanceScore * 0.20 + 
+    namingScore * 0.20
+  );
+  
+  return {
+    overall,
+    security: securityScore,
+    documentation: documentationScore,
+    performance: performanceScore,
+    naming: namingScore,
+  };
+}
+
+// 변경 위험도 분석
+function analyzeChangeRisk(endpoint: Partial<ApiEndpoint>, allEndpoints: Partial<ApiEndpoint>[]): ApiEndpoint['changeRisk'] {
+  const path = endpoint.path || '';
+  const method = endpoint.method || 'GET';
+  
+  // 의존 엔드포인트 찾기 (같은 리소스를 사용하는 다른 엔드포인트)
+  const pathParts = path.split('/').filter(p => p && !p.startsWith(':') && !p.startsWith('{'));
+  const resource = pathParts[pathParts.length - 1] || pathParts[0] || '';
+  
+  const dependentEndpoints = allEndpoints
+    .filter(ep => ep !== endpoint && ep.path?.includes(resource))
+    .map(ep => `${ep.method} ${ep.path}`)
+    .slice(0, 5);
+  
+  // 파라미터 수가 많으면 변경 위험도 증가
+  const paramCount = endpoint.parameters?.length || 0;
+  
+  // 복잡도가 높으면 위험도 증가
+  const complexityScore = endpoint.complexity?.score || 1;
+  
+  // 위험도 레벨 결정
+  let riskScore = 0;
+  if (paramCount > 5) riskScore += 3;
+  else if (paramCount > 3) riskScore += 1;
+  
+  if (complexityScore > 7) riskScore += 3;
+  else if (complexityScore > 4) riskScore += 1;
+  
+  if (dependentEndpoints.length > 3) riskScore += 2;
+  else if (dependentEndpoints.length > 0) riskScore += 1;
+  
+  if (endpoint.requestBody) riskScore += 1;
+  
+  // 중요 리소스 체크
+  if (/user|auth|payment|order|transaction/i.test(path)) {
+    riskScore += 2;
+  }
+  
+  const level: 'low' | 'medium' | 'high' = 
+    riskScore >= 6 ? 'high' :
+    riskScore >= 3 ? 'medium' : 'low';
+  
+  // Breaking change 위험
+  const breakingChangeRisk = 
+    method === 'DELETE' || 
+    (method === 'PUT' && paramCount > 2) ||
+    dependentEndpoints.length > 2;
+  
+  return {
+    level,
+    breakingChangeRisk,
+    dependentEndpoints,
+  };
 }
 
 // JSDoc/Docstring에서 설명 추출
@@ -3057,6 +3396,25 @@ export async function GET(
         websocket: 0,
         grpc: 0,
       },
+      // 헬스 스코어 통계 (NEW v2)
+      healthScore: {
+        average: 0,
+        distribution: { excellent: 0, good: 0, fair: 0, poor: 0 } as Record<string, number>,
+        lowestScoring: [] as { path: string; method: string; score: number }[],
+      },
+      // 네이밍 컨벤션 통계 (NEW v2)
+      naming: {
+        restfulCompliant: 0,
+        nonRestful: 0,
+        averageScore: 0,
+        commonIssues: {} as Record<string, number>,
+      },
+      // 일관성 통계 (NEW v2)
+      consistency: {
+        responseFormats: {} as Record<string, number>,
+        versioningStyles: {} as Record<string, number>,
+        errorHandling: { consistent: 0, inconsistent: 0, unknown: 0 },
+      },
       // 분석 시간
       analysisTimeMs: 0,
     };
@@ -3152,6 +3510,59 @@ export async function GET(
         path: ep.path,
         method: ep.method,
         score: ep.complexity?.score || 0,
+      }));
+    
+    // 헬스 스코어 통계 계산 (NEW v2)
+    let totalHealthScore = 0;
+    let totalNamingScore = 0;
+    for (const ep of endpoints) {
+      // 헬스 스코어
+      if (ep.healthScore) {
+        totalHealthScore += ep.healthScore.overall;
+        if (ep.healthScore.overall >= 80) stats.healthScore.distribution.excellent++;
+        else if (ep.healthScore.overall >= 60) stats.healthScore.distribution.good++;
+        else if (ep.healthScore.overall >= 40) stats.healthScore.distribution.fair++;
+        else stats.healthScore.distribution.poor++;
+      }
+      
+      // 네이밍 컨벤션 통계
+      if (ep.namingConvention) {
+        totalNamingScore += ep.namingConvention.score;
+        if (ep.namingConvention.followsRESTful) {
+          stats.naming.restfulCompliant++;
+        } else {
+          stats.naming.nonRestful++;
+        }
+        for (const issue of ep.namingConvention.issues) {
+          stats.naming.commonIssues[issue] = (stats.naming.commonIssues[issue] || 0) + 1;
+        }
+      }
+      
+      // 일관성 통계
+      if (ep.consistency) {
+        stats.consistency.responseFormats[ep.consistency.responseFormat] = 
+          (stats.consistency.responseFormats[ep.consistency.responseFormat] || 0) + 1;
+        stats.consistency.versioningStyles[ep.consistency.versioningStyle] = 
+          (stats.consistency.versioningStyles[ep.consistency.versioningStyle] || 0) + 1;
+        stats.consistency.errorHandling[ep.consistency.errorHandling]++;
+      }
+    }
+    
+    // 평균 계산
+    if (endpoints.length > 0) {
+      stats.healthScore.average = Math.round(totalHealthScore / endpoints.length);
+      stats.naming.averageScore = Math.round(totalNamingScore / endpoints.length);
+    }
+    
+    // 가장 낮은 헬스 스코어 엔드포인트 상위 5개
+    stats.healthScore.lowestScoring = endpoints
+      .filter(ep => ep.healthScore)
+      .sort((a, b) => (a.healthScore?.overall || 100) - (b.healthScore?.overall || 100))
+      .slice(0, 5)
+      .map(ep => ({
+        path: ep.path,
+        method: ep.method,
+        score: ep.healthScore?.overall || 0,
       }));
     
     stats.analysisTimeMs = Date.now() - startTime;
