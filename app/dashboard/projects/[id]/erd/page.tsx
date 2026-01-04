@@ -150,6 +150,12 @@ export default function ProjectErdPage() {
   const [projectName, setProjectName] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [schemaInfo, setSchemaInfo] = useState<{
+    type?: string;
+    language?: string;
+    frameworks?: string[];
+    path?: string;
+  }>({});
   
   const [positions, setPositions] = useState<Record<string, ModelPosition>>({});
   const [zoom, setZoom] = useState(0.5);
@@ -283,7 +289,13 @@ export default function ProjectErdPage() {
         if (data.error) {
           // 스키마 없는 경우 빈 결과로 처리
           setErdData({ models: [], relations: [] });
-          setError(data.error);
+          setError(data.message || data.error);
+          if (data.language || data.frameworks) {
+            setSchemaInfo({
+              language: data.language,
+              frameworks: data.frameworks,
+            });
+          }
         } else {
           setErdData(data);
           if (data.models && data.models.length > 0) {
@@ -292,6 +304,12 @@ export default function ProjectErdPage() {
           if (data.projectName) {
             setProjectName(data.projectName);
           }
+          setSchemaInfo({
+            type: data.schemaType,
+            language: data.language,
+            frameworks: data.frameworks,
+            path: data.schemaPath,
+          });
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -747,8 +765,25 @@ export default function ProjectErdPage() {
             </div>
             <div>
               <h1 className="text-lg font-bold text-gray-900 dark:text-white">ERD Viewer</h1>
-              <p className="text-xs text-gray-500">
-                {projectName} • {stats?.models || 0}개 모델 • {stats?.relations || 0}개 관계
+              <p className="text-xs text-gray-500 flex items-center gap-2">
+                <span>{projectName}</span>
+                <span>•</span>
+                <span>{stats?.models || 0}개 모델</span>
+                <span>•</span>
+                <span>{stats?.relations || 0}개 관계</span>
+                {schemaInfo.type && (
+                  <>
+                    <span>•</span>
+                    <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded text-[10px] font-medium uppercase">
+                      {schemaInfo.type}
+                    </span>
+                  </>
+                )}
+                {schemaInfo.language && (
+                  <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded text-[10px] font-medium">
+                    {schemaInfo.language}
+                  </span>
+                )}
               </p>
             </div>
           </div>

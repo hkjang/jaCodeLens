@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
-import { join, basename } from 'path';
+import { join, extname, basename } from 'path';
 import { prisma } from '@/lib/db';
 
 interface ErdField {
@@ -32,61 +32,144 @@ interface ErdData {
   models: ErdModel[];
   relations: ErdRelation[];
   schemaPath?: string;
+  schemaType?: string;
+  language?: string;
 }
 
-// 모델 카테고리 분류 (이름 기반 추론)
+type SchemaType = 'prisma' | 'django' | 'sqlalchemy' | 'typeorm' | 'sequelize' | 'laravel' | 'rails' | 'spring' | 'dotnet' | 'go' | 'sql' | 'unknown';
+
+// 프로젝트 언어 감지
+function detectProjectLanguage(projectPath: string): { language: string; frameworks: string[] } {
+  const files = new Map<string, boolean>();
+  const frameworks: string[] = [];
+  let language = 'unknown';
+  
+  try {
+    const entries = readdirSync(projectPath);
+    for (const entry of entries) {
+      files.set(entry.toLowerCase(), true);
+    }
+  } catch (e) {
+    return { language, frameworks };
+  }
+  
+  // Python
+  if (files.has('requirements.txt') || files.has('pyproject.toml') || files.has('setup.py') || files.has('pipfile')) {
+    language = 'python';
+    if (files.has('manage.py')) frameworks.push('django');
+    if (existsSync(join(projectPath, 'alembic.ini'))) frameworks.push('sqlalchemy');
+    if (existsSync(join(projectPath, 'app', 'models.py'))) frameworks.push('flask');
+  }
+  // JavaScript/TypeScript
+  else if (files.has('package.json')) {
+    language = 'javascript';
+    try {
+      const pkg = JSON.parse(readFileSync(join(projectPath, 'package.json'), 'utf-8'));
+      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+      if (deps.typescript) language = 'typescript';
+      if (deps.prisma || deps['@prisma/client']) frameworks.push('prisma');
+      if (deps.typeorm) frameworks.push('typeorm');
+      if (deps.sequelize) frameworks.push('sequelize');
+      if (deps.mongoose) frameworks.push('mongoose');
+      if (deps.drizzle) frameworks.push('drizzle');
+      if (deps.nextjs || deps.next) frameworks.push('nextjs');
+    } catch (e) {}
+  }
+  // PHP/Laravel
+  else if (files.has('composer.json')) {
+    language = 'php';
+    if (files.has('artisan')) frameworks.push('laravel');
+  }
+  // Ruby/Rails
+  else if (files.has('gemfile')) {
+    language = 'ruby';
+    if (files.has('config.ru') || existsSync(join(projectPath, 'app', 'models'))) {
+      frameworks.push('rails');
+    }
+  }
+  // Java/Spring
+  else if (files.has('pom.xml') || files.has('build.gradle') || files.has('build.gradle.kts')) {
+    language = 'java';
+    try {
+      const pomPath = join(projectPath, 'pom.xml');
+      if (existsSync(pomPath)) {
+        const pom = readFileSync(pomPath, 'utf-8');
+        if (pom.includes('spring-boot')) frameworks.push('spring');
+        if (pom.includes('hibernate')) frameworks.push('hibernate');
+      }
+    } catch (e) {}
+  }
+  // Go
+  else if (files.has('go.mod')) {
+    language = 'go';
+    try {
+      const goMod = readFileSync(join(projectPath, 'go.mod'), 'utf-8');
+      if (goMod.includes('gorm')) frameworks.push('gorm');
+      if (goMod.includes('ent')) frameworks.push('ent');
+    } catch (e) {}
+  }
+  // Rust
+  else if (files.has('cargo.toml')) {
+    language = 'rust';
+    try {
+      const cargo = readFileSync(join(projectPath, 'Cargo.toml'), 'utf-8');
+      if (cargo.includes('diesel')) frameworks.push('diesel');
+      if (cargo.includes('sea-orm')) frameworks.push('seaorm');
+    } catch (e) {}
+  }
+  // C#/.NET (마지막에 체크)
+  else {
+    try {
+      const dirEntries = readdirSync(projectPath);
+      if (dirEntries.some(e => e.endsWith('.csproj') || e.endsWith('.sln'))) {
+        language = 'csharp';
+        frameworks.push('dotnet');
+      }
+    } catch (e) {}
+  }
+  
+  return { language, frameworks };
+}
+
+// 모델 카테고리 분류
 function categorizeModel(name: string): string {
   const lowerName = name.toLowerCase();
   
-  if (lowerName.includes('user') || lowerName.includes('account') || lowerName.includes('auth')) {
-    return 'User';
-  }
-  if (lowerName.includes('project') || lowerName.includes('workspace')) {
-    return 'Project';
-  }
-  if (lowerName.includes('analysis') || lowerName.includes('result') || lowerName.includes('metric')) {
-    return 'Analysis';
-  }
-  if (lowerName.includes('code') || lowerName.includes('file') || lowerName.includes('element')) {
-    return 'Code';
-  }
-  if (lowerName.includes('agent') || lowerName.includes('task')) {
-    return 'Agent';
-  }
-  if (lowerName.includes('security') || lowerName.includes('vulnerability') || lowerName.includes('risk')) {
-    return 'Security';
-  }
-  if (lowerName.includes('arch') || lowerName.includes('service') || lowerName.includes('module')) {
-    return 'Architecture';
-  }
-  if (lowerName.includes('admin') || lowerName.includes('role') || lowerName.includes('permission')) {
-    return 'Admin';
-  }
-  if (lowerName.includes('ai') || lowerName.includes('model') || lowerName.includes('prompt')) {
-    return 'AI';
-  }
-  if (lowerName.includes('log') || lowerName.includes('audit') || lowerName.includes('history')) {
-    return 'Logging';
-  }
-  if (lowerName.includes('config') || lowerName.includes('setting')) {
-    return 'Config';
-  }
-  if (lowerName.includes('order') || lowerName.includes('product') || lowerName.includes('cart') || lowerName.includes('payment')) {
-    return 'Commerce';
-  }
-  if (lowerName.includes('post') || lowerName.includes('comment') || lowerName.includes('blog') || lowerName.includes('article')) {
-    return 'Content';
+  const categories: [string[], string][] = [
+    [['user', 'account', 'auth', 'member', 'profile'], 'User'],
+    [['project', 'workspace', 'team', 'organization'], 'Project'],
+    [['analysis', 'result', 'metric', 'report', 'stat'], 'Analysis'],
+    [['code', 'file', 'element', 'source'], 'Code'],
+    [['agent', 'task', 'job', 'queue', 'worker'], 'Agent'],
+    [['security', 'vulnerability', 'risk', 'threat'], 'Security'],
+    [['arch', 'service', 'module', 'component'], 'Architecture'],
+    [['admin', 'role', 'permission', 'policy'], 'Admin'],
+    [['ai', 'model', 'prompt', 'completion'], 'AI'],
+    [['log', 'audit', 'history', 'event'], 'Logging'],
+    [['config', 'setting', 'option', 'preference'], 'Config'],
+    [['order', 'product', 'cart', 'payment', 'invoice'], 'Commerce'],
+    [['post', 'comment', 'blog', 'article', 'content'], 'Content'],
+    [['category', 'tag', 'label', 'group'], 'Taxonomy'],
+    [['message', 'notification', 'email', 'sms'], 'Messaging'],
+    [['session', 'token', 'refresh', 'oauth'], 'Session'],
+  ];
+  
+  for (const [keywords, category] of categories) {
+    if (keywords.some(k => lowerName.includes(k))) {
+      return category;
+    }
   }
   
   return 'Other';
 }
 
+// ===================== SCHEMA PARSERS =====================
+
 // Prisma 스키마 파싱
-function parsePrismaSchema(content: string): Omit<ErdData, 'schemaPath'> {
+function parsePrismaSchema(content: string): Omit<ErdData, 'schemaPath' | 'schemaType' | 'language'> {
   const models: ErdModel[] = [];
   const relations: ErdRelation[] = [];
   
-  // 모델 블록 추출
   const modelRegex = /model\s+(\w+)\s*\{([^}]+)\}/g;
   let match;
   
@@ -95,13 +178,11 @@ function parsePrismaSchema(content: string): Omit<ErdData, 'schemaPath'> {
     const modelBody = match[2];
     const fields: ErdField[] = [];
     
-    // 필드 파싱
     const lines = modelBody.split('\n');
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('@@')) continue;
       
-      // 필드 패턴: fieldName Type? @attributes
       const fieldMatch = trimmed.match(/^(\w+)\s+(\w+)(\[\])?(\?)?(.*)$/);
       if (fieldMatch) {
         const [, fieldName, fieldType, isArray, isOptional, rest] = fieldMatch;
@@ -111,13 +192,10 @@ function parsePrismaSchema(content: string): Omit<ErdData, 'schemaPath'> {
         const defaultMatch = rest.match(/@default\(([^)]+)\)/);
         const defaultValue = defaultMatch ? defaultMatch[1] : undefined;
         
-        // 속성 추출
         const attributes: string[] = [];
         if (isPrimaryKey) attributes.push('@id');
         if (rest.includes('@unique')) attributes.push('@unique');
         if (rest.includes('@default')) attributes.push('@default');
-        if (rest.includes('@updatedAt')) attributes.push('@updatedAt');
-        if (rest.includes('@map')) attributes.push('@map');
         
         fields.push({
           name: fieldName,
@@ -130,16 +208,14 @@ function parsePrismaSchema(content: string): Omit<ErdData, 'schemaPath'> {
           attributes,
         });
         
-        // 관계 추출
         if (isRelation) {
           const relationMatch = rest.match(/@relation\(fields:\s*\[(\w+)\],\s*references:\s*\[(\w+)\]/);
           if (relationMatch) {
-            const [, fromField, toField] = relationMatch;
             relations.push({
               from: modelName,
               to: fieldType,
-              fromField,
-              toField,
+              fromField: relationMatch[1],
+              toField: relationMatch[2],
               type: isArray ? '1-n' : 'n-1',
             });
           }
@@ -147,74 +223,371 @@ function parsePrismaSchema(content: string): Omit<ErdData, 'schemaPath'> {
       }
     }
     
-    models.push({
-      name: modelName,
-      fields,
-      category: categorizeModel(modelName),
-    });
+    models.push({ name: modelName, fields, category: categorizeModel(modelName) });
   }
   
   return { models, relations };
 }
 
-// 프로젝트 경로에서 Prisma 스키마 파일 찾기
-function findPrismaSchema(projectPath: string): string | null {
-  // 일반적인 Prisma 스키마 위치들
-  const commonPaths = [
-    'prisma/schema.prisma',
-    'schema.prisma',
-    'db/schema.prisma',
-    'database/schema.prisma',
-    'src/prisma/schema.prisma',
-  ];
+// Django models.py 파싱
+function parseDjangoModels(content: string): Omit<ErdData, 'schemaPath' | 'schemaType' | 'language'> {
+  const models: ErdModel[] = [];
+  const relations: ErdRelation[] = [];
   
-  for (const relativePath of commonPaths) {
-    const fullPath = join(projectPath, relativePath);
-    if (existsSync(fullPath)) {
-      return fullPath;
+  // class ModelName(models.Model): 패턴
+  const classRegex = /class\s+(\w+)\s*\(\s*(?:models\.Model|[\w.]+)\s*\):([\s\S]*?)(?=\nclass\s|\n[^\s]|$)/g;
+  let match;
+  
+  while ((match = classRegex.exec(content)) !== null) {
+    const modelName = match[1];
+    const classBody = match[2];
+    const fields: ErdField[] = [];
+    
+    // 필드 패턴: field_name = models.FieldType(...)
+    const fieldRegex = /(\w+)\s*=\s*models\.(\w+)\s*\(([^)]*)\)/g;
+    let fieldMatch;
+    
+    while ((fieldMatch = fieldRegex.exec(classBody)) !== null) {
+      const [, fieldName, fieldType, args] = fieldMatch;
+      
+      const isPrimaryKey = fieldType === 'AutoField' || args.includes('primary_key=True');
+      const isRelation = ['ForeignKey', 'OneToOneField', 'ManyToManyField'].includes(fieldType);
+      const isOptional = args.includes('null=True') || args.includes('blank=True');
+      const isArray = fieldType === 'ManyToManyField';
+      
+      const attributes: string[] = [];
+      if (isPrimaryKey) attributes.push('primary_key');
+      if (args.includes('unique=True')) attributes.push('unique');
+      if (args.includes('default=')) attributes.push('default');
+      
+      fields.push({
+        name: fieldName,
+        type: fieldType,
+        isPrimaryKey,
+        isOptional,
+        isArray,
+        isRelation,
+        attributes,
+      });
+      
+      if (isRelation) {
+        const targetMatch = args.match(/['"]?(\w+)['"]?/);
+        if (targetMatch) {
+          relations.push({
+            from: modelName,
+            to: targetMatch[1] === 'self' ? modelName : targetMatch[1],
+            fromField: fieldName,
+            toField: 'id',
+            type: isArray ? 'n-n' : fieldType === 'OneToOneField' ? '1-1' : 'n-1',
+          });
+        }
+      }
     }
+    
+    // id 필드 자동 추가 (없는 경우)
+    if (!fields.some(f => f.isPrimaryKey)) {
+      fields.unshift({
+        name: 'id',
+        type: 'AutoField',
+        isPrimaryKey: true,
+        isOptional: false,
+        isArray: false,
+        isRelation: false,
+        attributes: ['primary_key'],
+      });
+    }
+    
+    models.push({ name: modelName, fields, category: categorizeModel(modelName) });
   }
   
-  // 재귀적으로 schema.prisma 파일 찾기 (최대 3단계)
-  function searchDir(dir: string, depth: number): string | null {
-    if (depth > 3) return null;
+  return { models, relations };
+}
+
+// TypeORM Entity 파싱
+function parseTypeORMEntities(content: string): Omit<ErdData, 'schemaPath' | 'schemaType' | 'language'> {
+  const models: ErdModel[] = [];
+  const relations: ErdRelation[] = [];
+  
+  // @Entity() class 패턴
+  const entityRegex = /@Entity\s*\([^)]*\)\s*(?:export\s+)?class\s+(\w+)[\s\S]*?\{([\s\S]*?)\n\}/g;
+  let match;
+  
+  while ((match = entityRegex.exec(content)) !== null) {
+    const modelName = match[1];
+    const classBody = match[2];
+    const fields: ErdField[] = [];
+    
+    // 컬럼 데코레이터 패턴
+    const columnRegex = /@(PrimaryGeneratedColumn|PrimaryColumn|Column|ManyToOne|OneToMany|ManyToMany|OneToOne)\s*\(([^)]*)\)[\s\S]*?(\w+)\s*[?:]?\s*[:\s]*(\w+)?/g;
+    let colMatch;
+    
+    while ((colMatch = columnRegex.exec(classBody)) !== null) {
+      const [, decorator, args, fieldName, fieldType] = colMatch;
+      
+      const isPrimaryKey = decorator.includes('Primary');
+      const isRelation = ['ManyToOne', 'OneToMany', 'ManyToMany', 'OneToOne'].includes(decorator);
+      const isArray = decorator === 'OneToMany' || decorator === 'ManyToMany';
+      
+      fields.push({
+        name: fieldName,
+        type: fieldType || 'unknown',
+        isPrimaryKey,
+        isOptional: false,
+        isArray,
+        isRelation,
+        attributes: [decorator],
+      });
+      
+      if (isRelation && fieldType) {
+        const relType = decorator === 'OneToOne' ? '1-1' : 
+                        decorator === 'ManyToOne' ? 'n-1' :
+                        decorator === 'OneToMany' ? '1-n' : 'n-n';
+        relations.push({
+          from: modelName,
+          to: fieldType.replace(/[\[\]]/g, ''),
+          fromField: fieldName,
+          toField: 'id',
+          type: relType,
+        });
+      }
+    }
+    
+    models.push({ name: modelName, fields, category: categorizeModel(modelName) });
+  }
+  
+  return { models, relations };
+}
+
+// SQL DDL 파싱
+function parseSQLSchema(content: string): Omit<ErdData, 'schemaPath' | 'schemaType' | 'language'> {
+  const models: ErdModel[] = [];
+  const relations: ErdRelation[] = [];
+  
+  // CREATE TABLE 패턴
+  const tableRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"']?(\w+)[`"']?\s*\(([\s\S]*?)\);/gi;
+  let match;
+  
+  while ((match = tableRegex.exec(content)) !== null) {
+    const tableName = match[1];
+    const tableBody = match[2];
+    const fields: ErdField[] = [];
+    
+    // 컬럼 정의 파싱
+    const lines = tableBody.split(',');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.toUpperCase().startsWith('PRIMARY KEY') || 
+          trimmed.toUpperCase().startsWith('FOREIGN KEY') ||
+          trimmed.toUpperCase().startsWith('CONSTRAINT') ||
+          trimmed.toUpperCase().startsWith('INDEX') ||
+          trimmed.toUpperCase().startsWith('KEY')) continue;
+      
+      const colMatch = trimmed.match(/^[`"']?(\w+)[`"']?\s+(\w+)(?:\([^)]+\))?(.*)$/i);
+      if (colMatch) {
+        const [, colName, colType, rest] = colMatch;
+        const upperRest = rest.toUpperCase();
+        
+        fields.push({
+          name: colName,
+          type: colType.toUpperCase(),
+          isPrimaryKey: upperRest.includes('PRIMARY KEY') || upperRest.includes('AUTO_INCREMENT'),
+          isOptional: !upperRest.includes('NOT NULL'),
+          isArray: false,
+          isRelation: false,
+          attributes: [],
+        });
+      }
+    }
+    
+    // FOREIGN KEY 추출
+    const fkRegex = /FOREIGN\s+KEY\s*\([`"']?(\w+)[`"']?\)\s*REFERENCES\s+[`"']?(\w+)[`"']?\s*\([`"']?(\w+)[`"']?\)/gi;
+    let fkMatch: RegExpExecArray | null;
+    while ((fkMatch = fkRegex.exec(tableBody)) !== null) {
+      const matchResult = fkMatch;
+      relations.push({
+        from: tableName,
+        to: matchResult[2],
+        fromField: matchResult[1],
+        toField: matchResult[3],
+        type: 'n-1',
+      });
+      
+      const field = fields.find(f => f.name === matchResult[1]);
+      if (field) field.isRelation = true;
+    }
+    
+    models.push({ name: tableName, fields, category: categorizeModel(tableName) });
+  }
+  
+  return { models, relations };
+}
+
+// Laravel Eloquent 파싱 (PHP)
+function parseLaravelModels(content: string): Omit<ErdData, 'schemaPath' | 'schemaType' | 'language'> {
+  const models: ErdModel[] = [];
+  const relations: ErdRelation[] = [];
+  
+  // class ModelName extends Model 패턴
+  const classRegex = /class\s+(\w+)\s+extends\s+(?:Model|Eloquent)([\s\S]*?)\n\}/g;
+  let match;
+  
+  while ((match = classRegex.exec(content)) !== null) {
+    const modelName = match[1];
+    const classBody = match[2];
+    const fields: ErdField[] = [];
+    
+    // $fillable 배열에서 필드 추출
+    const fillableMatch = classBody.match(/\$fillable\s*=\s*\[([\s\S]*?)\]/);
+    if (fillableMatch) {
+      const fieldNames = fillableMatch[1].match(/'(\w+)'/g);
+      if (fieldNames) {
+        for (const fn of fieldNames) {
+          fields.push({
+            name: fn.replace(/'/g, ''),
+            type: 'string',
+            isPrimaryKey: false,
+            isOptional: true,
+            isArray: false,
+            isRelation: false,
+            attributes: ['fillable'],
+          });
+        }
+      }
+    }
+    
+    // 관계 메서드 추출
+    const relRegex = /function\s+(\w+)\s*\(\s*\)\s*(?::\s*\w+)?\s*\{\s*return\s+\$this->(belongsTo|hasMany|hasOne|belongsToMany)\s*\(\s*(\w+)::class/g;
+    let relMatch;
+    while ((relMatch = relRegex.exec(classBody)) !== null) {
+      const [, methodName, relType, targetModel] = relMatch;
+      
+      const type = relType === 'hasOne' ? '1-1' :
+                   relType === 'hasMany' ? '1-n' :
+                   relType === 'belongsTo' ? 'n-1' : 'n-n';
+      
+      relations.push({
+        from: modelName,
+        to: targetModel,
+        fromField: methodName,
+        toField: 'id',
+        type,
+      });
+    }
+    
+    // id 필드 추가
+    fields.unshift({
+      name: 'id',
+      type: 'integer',
+      isPrimaryKey: true,
+      isOptional: false,
+      isArray: false,
+      isRelation: false,
+      attributes: ['primary_key'],
+    });
+    
+    models.push({ name: modelName, fields, category: categorizeModel(modelName) });
+  }
+  
+  return { models, relations };
+}
+
+// ===================== SCHEMA FINDER =====================
+
+interface SchemaFile {
+  path: string;
+  type: SchemaType;
+  content?: string;
+}
+
+function findSchemaFiles(projectPath: string, frameworks: string[]): SchemaFile[] {
+  const schemaFiles: SchemaFile[] = [];
+  
+  // 프레임워크별 스키마 파일 위치
+  const schemaPatterns: Record<string, { paths: string[]; type: SchemaType }> = {
+    prisma: { paths: ['prisma/schema.prisma', 'schema.prisma'], type: 'prisma' },
+    django: { paths: ['**/models.py', 'models.py'], type: 'django' },
+    sqlalchemy: { paths: ['**/models.py', 'models/*.py'], type: 'sqlalchemy' },
+    typeorm: { paths: ['src/entity/*.ts', 'entities/*.ts', '**/entity/*.ts'], type: 'typeorm' },
+    sequelize: { paths: ['models/*.js', 'models/*.ts', 'src/models/*.ts'], type: 'sequelize' },
+    laravel: { paths: ['app/Models/*.php', 'app/*.php'], type: 'laravel' },
+    rails: { paths: ['app/models/*.rb', 'db/schema.rb'], type: 'rails' },
+    spring: { paths: ['src/main/java/**/entity/*.java', 'src/main/java/**/model/*.java'], type: 'spring' },
+    dotnet: { paths: ['Models/*.cs', '**/Models/*.cs', '**/Entities/*.cs'], type: 'dotnet' },
+    gorm: { paths: ['models/*.go', 'model/*.go', '**/model/*.go'], type: 'go' },
+  };
+  
+  // 우선순위: 감지된 프레임워크부터 검색
+  const searchOrder = [...frameworks, ...Object.keys(schemaPatterns).filter(k => !frameworks.includes(k))];
+  
+  for (const framework of searchOrder) {
+    const pattern = schemaPatterns[framework];
+    if (!pattern) continue;
+    
+    for (const pathPattern of pattern.paths) {
+      const found = searchForSchema(projectPath, pathPattern, pattern.type);
+      schemaFiles.push(...found);
+    }
+    
+    if (schemaFiles.length > 0) break; // 첫 번째로 찾은 스키마 사용
+  }
+  
+  // SQL 파일도 검색 (폴백)
+  if (schemaFiles.length === 0) {
+    const sqlFiles = searchForSchema(projectPath, '*.sql', 'sql');
+    schemaFiles.push(...sqlFiles);
+  }
+  
+  return schemaFiles;
+}
+
+function searchForSchema(projectPath: string, pattern: string, type: SchemaType): SchemaFile[] {
+  const results: SchemaFile[] = [];
+  
+  function search(dir: string, depth: number) {
+    if (depth > 4) return;
     
     try {
       const entries = readdirSync(dir);
       
       for (const entry of entries) {
-        // node_modules, .git 등 제외
-        if (entry === 'node_modules' || entry === '.git' || entry === 'dist' || entry === 'build') {
-          continue;
-        }
+        if (['node_modules', '.git', 'dist', 'build', '__pycache__', '.next', 'vendor'].includes(entry)) continue;
         
         const fullPath = join(dir, entry);
         
         try {
           const stat = statSync(fullPath);
           
-          if (stat.isFile() && entry === 'schema.prisma') {
-            return fullPath;
-          }
-          
-          if (stat.isDirectory()) {
-            const found = searchDir(fullPath, depth + 1);
-            if (found) return found;
+          if (stat.isFile()) {
+            const ext = extname(entry);
+            const name = basename(entry);
+            
+            // 패턴 매칭
+            if (pattern.includes('*')) {
+              const patternExt = extname(pattern);
+              const patternBase = basename(pattern).replace('*', '');
+              
+              if ((patternExt === ext || patternExt === '.*') && 
+                  (patternBase === '' || entry.includes(patternBase.replace('*', '')))) {
+                results.push({ path: fullPath, type });
+              }
+            } else if (pattern === entry || pattern.endsWith(entry)) {
+              results.push({ path: fullPath, type });
+            }
+          } else if (stat.isDirectory()) {
+            search(fullPath, depth + 1);
           }
         } catch (e) {
-          // 접근 권한 없는 파일/폴더 무시
           continue;
         }
       }
-    } catch (e) {
-      // 디렉토리 읽기 실패 무시
-    }
-    
-    return null;
+    } catch (e) {}
   }
   
-  return searchDir(projectPath, 0);
+  search(projectPath, 0);
+  return results.slice(0, 5); // 최대 5개
 }
+
+// ===================== MAIN HANDLER =====================
 
 export async function GET(
   request: NextRequest,
@@ -223,66 +596,88 @@ export async function GET(
   try {
     const { id } = await params;
     
-    // 프로젝트 정보 가져오기
     const project = await prisma.project.findUnique({
       where: { id },
       select: { id: true, name: true, path: true }
     });
     
     if (!project) {
-      return NextResponse.json(
-        { error: 'Project not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'Project not found', models: [], relations: [] }, { status: 200 });
     }
     
-    // 프로젝트 경로 확인
     if (!project.path || !existsSync(project.path)) {
-      return NextResponse.json(
-        { error: 'Project path not found', projectPath: project.path },
-        { status: 404 }
-      );
+      return NextResponse.json({ 
+        error: 'Project path not found', 
+        projectPath: project.path,
+        models: [], 
+        relations: [] 
+      }, { status: 200 });
     }
     
-    // Prisma 스키마 파일 찾기
-    const schemaPath = findPrismaSchema(project.path);
+    // 프로젝트 언어 및 프레임워크 감지
+    const { language, frameworks } = detectProjectLanguage(project.path);
     
-    if (!schemaPath) {
-      return NextResponse.json(
-        { 
-          error: 'Prisma schema not found in project',
-          searchedPath: project.path,
-          models: [],
-          relations: []
-        },
-        { status: 200 } // 스키마 없어도 빈 결과 반환
-      );
+    // 스키마 파일 찾기
+    const schemaFiles = findSchemaFiles(project.path, frameworks);
+    
+    if (schemaFiles.length === 0) {
+      return NextResponse.json({
+        error: 'No schema files found',
+        message: `프로젝트에서 스키마 파일을 찾을 수 없습니다. (감지된 언어: ${language}, 프레임워크: ${frameworks.join(', ') || 'none'})`,
+        searchedPath: project.path,
+        language,
+        frameworks,
+        models: [],
+        relations: []
+      }, { status: 200 });
     }
     
-    // 스키마 파일 읽기 및 파싱
-    const schemaContent = readFileSync(schemaPath, 'utf-8');
-    const erdData = parsePrismaSchema(schemaContent);
+    // 첫 번째 스키마 파일 파싱
+    const schemaFile = schemaFiles[0];
+    const content = readFileSync(schemaFile.path, 'utf-8');
+    
+    let erdData: Omit<ErdData, 'schemaPath' | 'schemaType' | 'language'>;
+    
+    switch (schemaFile.type) {
+      case 'prisma':
+        erdData = parsePrismaSchema(content);
+        break;
+      case 'django':
+      case 'sqlalchemy':
+        erdData = parseDjangoModels(content);
+        break;
+      case 'typeorm':
+        erdData = parseTypeORMEntities(content);
+        break;
+      case 'laravel':
+        erdData = parseLaravelModels(content);
+        break;
+      case 'sql':
+        erdData = parseSQLSchema(content);
+        break;
+      default:
+        // 기본적으로 Prisma 파서 시도
+        erdData = parsePrismaSchema(content);
+    }
     
     return NextResponse.json({
       ...erdData,
-      schemaPath: schemaPath.replace(project.path, ''),
+      schemaPath: schemaFile.path.replace(project.path, ''),
+      schemaType: schemaFile.type,
+      language,
+      frameworks,
       projectName: project.name,
-      projectPath: project.path
+      projectPath: project.path,
+      availableSchemas: schemaFiles.map(s => ({ path: s.path.replace(project.path, ''), type: s.type }))
     });
     
   } catch (error) {
-    console.error('Failed to parse Prisma schema:', error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const errorStack = error instanceof Error ? error.stack : undefined;
-    return NextResponse.json(
-      { 
-        error: 'Failed to parse Prisma schema', 
-        details: errorMessage,
-        stack: errorStack,
-        models: [],
-        relations: []
-      },
-      { status: 200 } // 오류여도 빈 결과 반환하여 UI가 깨지지 않도록
-    );
+    console.error('Failed to parse schema:', error);
+    return NextResponse.json({
+      error: 'Failed to parse schema',
+      details: error instanceof Error ? error.message : String(error),
+      models: [],
+      relations: []
+    }, { status: 200 });
   }
 }
