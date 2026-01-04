@@ -75,6 +75,32 @@ interface ApiEndpoint {
     methods?: string[];
     headers?: string[];
   };
+  // 분석 메타데이터 (Enhanced)
+  complexity?: {
+    score: number; // 1-10 scale
+    factors: string[];
+    cyclomaticComplexity?: number;
+  };
+  documentationScore?: {
+    score: number; // 0-100
+    hasDescription: boolean;
+    hasParameterDocs: boolean;
+    hasResponseDocs: boolean;
+    hasExamples: boolean;
+  };
+  securityAnalysis?: {
+    issues: { severity: 'low' | 'medium' | 'high' | 'critical'; message: string; recommendation: string }[];
+    hasAuth: boolean;
+    hasRateLimit: boolean;
+    hasInputValidation: boolean;
+    hasSanitization: boolean;
+  };
+  performance?: {
+    hasCaching: boolean;
+    hasCompression: boolean;
+    hasPagination: boolean;
+    estimatedLatency?: 'low' | 'medium' | 'high';
+  };
 }
 
 interface ApiGroup {
@@ -767,6 +793,350 @@ function detectApiVersion(path: string, content: string): string | undefined {
   }
   
   return undefined;
+}
+
+// ===== 분석 함수들 (NEW) =====
+
+// API 복잡도 계산
+function calculateComplexity(content: string, startIndex: number, endpoint: Partial<ApiEndpoint>): ApiEndpoint['complexity'] {
+  const factors: string[] = [];
+  let score = 1; // Base score
+  
+  const funcContent = content.substring(startIndex, startIndex + 3000);
+  
+  // Factor 1: Number of parameters
+  const paramCount = endpoint.parameters?.length || 0;
+  if (paramCount > 5) {
+    factors.push('Many parameters');
+    score += 2;
+  } else if (paramCount > 2) {
+    factors.push('Multiple parameters');
+    score += 1;
+  }
+  
+  // Factor 2: Request body complexity
+  if (endpoint.requestBody) {
+    factors.push('Has request body');
+    score += 1;
+    if (endpoint.requestBody.contentType === 'multipart/form-data') {
+      factors.push('File upload');
+      score += 1;
+    }
+  }
+  
+  // Factor 3: Authentication
+  if (endpoint.auth && endpoint.auth !== 'none') {
+    factors.push('Requires authentication');
+    score += 1;
+  }
+  
+  // Factor 4: Middleware count
+  const middlewareCount = endpoint.middleware?.length || 0;
+  if (middlewareCount > 3) {
+    factors.push('Many middlewares');
+    score += 2;
+  } else if (middlewareCount > 0) {
+    factors.push('Has middleware');
+    score += 1;
+  }
+  
+  // Factor 5: Database operations
+  const dbPatterns = /prisma\.|\.findMany|\.findUnique|\.create|\.update|\.delete|SELECT|INSERT|UPDATE|DELETE|mongoose\.|\.save\(\)/gi;
+  const dbMatches = funcContent.match(dbPatterns);
+  if (dbMatches && dbMatches.length > 3) {
+    factors.push('Multiple DB operations');
+    score += 2;
+  } else if (dbMatches && dbMatches.length > 0) {
+    factors.push('Database access');
+    score += 1;
+  }
+  
+  // Factor 6: External API calls
+  if (funcContent.match(/fetch\(|axios\.|http\.|https\.|request\(|\.ajax/gi)) {
+    factors.push('External API calls');
+    score += 2;
+  }
+  
+  // Factor 7: Try-catch blocks (error handling complexity)
+  const tryCatchCount = (funcContent.match(/try\s*\{/g) || []).length;
+  if (tryCatchCount > 2) {
+    factors.push('Complex error handling');
+    score += 1;
+  }
+  
+  // Factor 8: Conditional statements (cyclomatic complexity approximation)
+  const conditionals = (funcContent.match(/if\s*\(|else\s+if|switch\s*\(|\?\s*:/g) || []).length;
+  const cyclomaticComplexity = conditionals + 1;
+  if (conditionals > 10) {
+    factors.push('High branching');
+    score += 2;
+  } else if (conditionals > 5) {
+    factors.push('Moderate branching');
+    score += 1;
+  }
+  
+  // Factor 9: Loop statements
+  const loops = (funcContent.match(/for\s*\(|while\s*\(|\.forEach|\.map\(|\.reduce\(|\.filter\(/g) || []).length;
+  if (loops > 5) {
+    factors.push('Many iterations');
+    score += 1;
+  }
+  
+  // Factor 10: Async/Promise complexity
+  const asyncOps = (funcContent.match(/await\s|Promise\.|\.then\(|\.catch\(/g) || []).length;
+  if (asyncOps > 5) {
+    factors.push('Complex async flow');
+    score += 1;
+  }
+  
+  return {
+    score: Math.min(10, score),
+    factors,
+    cyclomaticComplexity,
+  };
+}
+
+// 보안 분석
+function analyzeSecurityIssues(content: string, startIndex: number, endpoint: Partial<ApiEndpoint>): ApiEndpoint['securityAnalysis'] {
+  const issues: { severity: 'low' | 'medium' | 'high' | 'critical'; message: string; recommendation: string }[] = [];
+  const funcContent = content.substring(startIndex, startIndex + 3000);
+  
+  // Check 1: No authentication
+  const hasAuth = endpoint.auth && endpoint.auth !== 'none';
+  if (!hasAuth && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(endpoint.method || '')) {
+    issues.push({
+      severity: 'high',
+      message: 'Mutation endpoint without authentication',
+      recommendation: 'Add authentication middleware to protect this endpoint'
+    });
+  }
+  
+  // Check 2: No rate limiting
+  const hasRateLimit = !!endpoint.rateLimit;
+  if (!hasRateLimit && endpoint.method === 'POST') {
+    issues.push({
+      severity: 'medium',
+      message: 'POST endpoint without rate limiting',
+      recommendation: 'Add rate limiting to prevent abuse'
+    });
+  }
+  
+  // Check 3: SQL Injection risk
+  const sqlInjectionPatterns = /\$\{.*\}.*(?:SELECT|INSERT|UPDATE|DELETE)|`.*\$\{.*\}.*(?:FROM|WHERE|VALUES)`|\.query\s*\(.*\+|\.raw\s*\(.*\+/gi;
+  if (funcContent.match(sqlInjectionPatterns)) {
+    issues.push({
+      severity: 'critical',
+      message: 'Potential SQL injection vulnerability',
+      recommendation: 'Use parameterized queries or an ORM'
+    });
+  }
+  
+  // Check 4: Input validation
+  const hasInputValidation = !!(
+    funcContent.match(/\.parse\(|\.validate\(|\.safeParse\(|@IsString|@IsNumber|@Valid|validator\./gi) ||
+    endpoint.validation
+  );
+  if (!hasInputValidation && endpoint.requestBody) {
+    issues.push({
+      severity: 'medium',
+      message: 'Request body without validation',
+      recommendation: 'Add schema validation using Zod, Joi, or class-validator'
+    });
+  }
+  
+  // Check 5: eval() or Function constructor
+  if (funcContent.match(/eval\s*\(|new\s+Function\s*\(/)) {
+    issues.push({
+      severity: 'critical',
+      message: 'Use of eval() or Function constructor',
+      recommendation: 'Avoid dynamic code execution; use safer alternatives'
+    });
+  }
+  
+  // Check 6: Hardcoded secrets
+  if (funcContent.match(/password\s*[=:]\s*['"][^'"]{4,}['"]|api[_-]?key\s*[=:]\s*['"][^'"]{8,}['"]/gi)) {
+    issues.push({
+      severity: 'critical',
+      message: 'Possible hardcoded secret detected',
+      recommendation: 'Move secrets to environment variables'
+    });
+  }
+  
+  // Check 7: CORS wildcard
+  if (funcContent.match(/['"]Access-Control-Allow-Origin['"].*['"]\*['"]|cors\s*\(\s*\)/gi)) {
+    issues.push({
+      severity: 'medium',
+      message: 'CORS allows all origins',
+      recommendation: 'Restrict CORS to specific trusted origins'
+    });
+  }
+  
+  // Check 8: No HTTPS enforcement
+  if (funcContent.match(/http:\/\/(?!localhost|127\.0\.0\.1)/gi)) {
+    issues.push({
+      severity: 'low',
+      message: 'HTTP URL detected (non-localhost)',
+      recommendation: 'Use HTTPS for external connections'
+    });
+  }
+  
+  // Check 9: XSS vulnerability (innerHTML, dangerouslySetInnerHTML)
+  if (funcContent.match(/\.innerHTML\s*=|dangerouslySetInnerHTML/gi)) {
+    issues.push({
+      severity: 'high',
+      message: 'Potential XSS vulnerability',
+      recommendation: 'Sanitize user input before rendering'
+    });
+  }
+  
+  // Check 10: Sanitization
+  const hasSanitization = !!funcContent.match(/sanitize|escape|encode|DOMPurify|xss/gi);
+  
+  return {
+    issues,
+    hasAuth: hasAuth || false,
+    hasRateLimit,
+    hasInputValidation,
+    hasSanitization,
+  };
+}
+
+// 문서화 품질 점수 계산
+function calculateDocumentationScore(content: string, startIndex: number, endpoint: Partial<ApiEndpoint>): ApiEndpoint['documentationScore'] {
+  let score = 0;
+  const beforeFunc = content.substring(Math.max(0, startIndex - 500), startIndex);
+  
+  // Check 1: Has description (30 points)
+  const hasDescription = !!(
+    beforeFunc.match(/\/\*\*[\s\S]*?\*\//) ||
+    beforeFunc.match(/"""[\s\S]*?"""/) ||
+    beforeFunc.match(/'''[\s\S]*?'''/) ||
+    endpoint.description
+  );
+  if (hasDescription) score += 30;
+  
+  // Check 2: Has parameter documentation (25 points)
+  const hasParameterDocs = !!(
+    beforeFunc.match(/@param\s/) ||
+    beforeFunc.match(/:param\s/) ||
+    beforeFunc.match(/Args:/i) ||
+    endpoint.parameters?.some(p => p.description)
+  );
+  if (hasParameterDocs) score += 25;
+  
+  // Check 3: Has response documentation (25 points)
+  const hasResponseDocs = !!(
+    beforeFunc.match(/@returns?|@response/i) ||
+    beforeFunc.match(/Returns:/i) ||
+    endpoint.responses?.some(r => r.description)
+  );
+  if (hasResponseDocs) score += 25;
+  
+  // Check 4: Has examples (20 points)
+  const hasExamples = !!(
+    beforeFunc.match(/@example/i) ||
+    beforeFunc.match(/Example:/i) ||
+    endpoint.requestBody?.example
+  );
+  if (hasExamples) score += 20;
+  
+  return {
+    score,
+    hasDescription,
+    hasParameterDocs,
+    hasResponseDocs,
+    hasExamples,
+  };
+}
+
+// 성능 분석
+function analyzePerformance(content: string, startIndex: number, endpoint: Partial<ApiEndpoint>): ApiEndpoint['performance'] {
+  const funcContent = content.substring(startIndex, startIndex + 3000);
+  
+  // Check caching
+  const hasCaching = !!(
+    endpoint.cache ||
+    funcContent.match(/redis|memcache|cache\.|@Cache|\.setex\(|unstable_cache|revalidate/gi)
+  );
+  
+  // Check compression
+  const hasCompression = !!(
+    funcContent.match(/gzip|compress|deflate|@Compress|compression\(/gi)
+  );
+  
+  // Check pagination
+  const hasPagination = !!(
+    funcContent.match(/page|limit|offset|skip|take|cursor|pagination/gi) &&
+    funcContent.match(/\d+|parseInt|Number\(/gi)
+  );
+  
+  // Estimate latency based on operations
+  let estimatedLatency: 'low' | 'medium' | 'high' = 'low';
+  
+  // External API calls = high latency
+  if (funcContent.match(/fetch\(|axios\.|http\.get|https\.get/gi)) {
+    estimatedLatency = 'high';
+  }
+  // Multiple DB operations = medium to high
+  else if ((funcContent.match(/prisma\.|mongoose\.|\.find|\.query/gi) || []).length > 3) {
+    estimatedLatency = 'high';
+  }
+  else if (funcContent.match(/prisma\.|mongoose\.|\.find|\.query/gi)) {
+    estimatedLatency = 'medium';
+  }
+  // File operations = medium
+  else if (funcContent.match(/readFile|writeFile|streams/gi)) {
+    estimatedLatency = 'medium';
+  }
+  
+  return {
+    hasCaching,
+    hasCompression,
+    hasPagination,
+    estimatedLatency,
+  };
+}
+
+// 파일 캐시 (성능 최적화)
+const fileCache = new Map<string, { content: string; mtime: number }>();
+const CACHE_TTL = 60000; // 1 minute
+
+function readFileCached(filePath: string): string {
+  try {
+    const stat = statSync(filePath);
+    const cached = fileCache.get(filePath);
+    
+    if (cached && cached.mtime === stat.mtimeMs) {
+      return cached.content;
+    }
+    
+    const content = readFileSync(filePath, 'utf-8');
+    fileCache.set(filePath, { content, mtime: stat.mtimeMs });
+    
+    // Clean up old cache entries
+    if (fileCache.size > 500) {
+      const entries = Array.from(fileCache.entries());
+      entries.slice(0, 100).forEach(([key]) => fileCache.delete(key));
+    }
+    
+    return content;
+  } catch {
+    return '';
+  }
+}
+
+// 엔드포인트에 분석 정보 추가
+function enrichEndpointWithAnalysis(
+  endpoint: ApiEndpoint,
+  content: string,
+  startIndex: number
+): ApiEndpoint {
+  endpoint.complexity = calculateComplexity(content, startIndex, endpoint);
+  endpoint.documentationScore = calculateDocumentationScore(content, startIndex, endpoint);
+  endpoint.securityAnalysis = analyzeSecurityIssues(content, startIndex, endpoint);
+  endpoint.performance = analyzePerformance(content, startIndex, endpoint);
+  
+  return endpoint;
 }
 
 // JSDoc/Docstring에서 설명 추출
@@ -2536,6 +2906,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const startTime = Date.now();
     
     const project = await prisma.project.findUnique({
       where: { id },
@@ -2628,20 +2999,162 @@ export async function GET(
         ];
     }
     
+    // GraphQL 엔드포인트 추가
+    const graphqlEndpoints = parseGraphQLEndpoints(project.path);
+    endpoints = [...endpoints, ...graphqlEndpoints];
+    
+    // WebSocket 엔드포인트 추가
+    const wsEndpoints = parseWebSocketEndpoints(project.path);
+    endpoints = [...endpoints, ...wsEndpoints];
+    
+    // gRPC 엔드포인트 추가
+    const grpcEndpoints = parseGrpcEndpoints(project.path);
+    endpoints = [...endpoints, ...grpcEndpoints];
+    
     // 그룹화
     const groups = groupEndpoints(endpoints);
     
-    // 통계
+    // 향상된 통계
     const stats = {
       total: endpoints.length,
       byMethod: {} as Record<string, number>,
       byFramework: {} as Record<string, number>,
+      byAuth: {} as Record<string, number>,
+      // 보안 분석 통계 (NEW)
+      security: {
+        endpointsWithAuth: 0,
+        endpointsWithoutAuth: 0,
+        endpointsWithValidation: 0,
+        endpointsWithRateLimit: 0,
+        totalSecurityIssues: 0,
+        issuesBySeverity: { critical: 0, high: 0, medium: 0, low: 0 } as Record<string, number>,
+      },
+      // 복잡도 통계 (NEW)
+      complexity: {
+        average: 0,
+        distribution: { low: 0, medium: 0, high: 0 } as Record<string, number>,
+        mostComplex: [] as { path: string; method: string; score: number }[],
+      },
+      // 문서화 통계 (NEW)
+      documentation: {
+        averageScore: 0,
+        wellDocumented: 0, // score >= 70
+        partiallyDocumented: 0, // 30 <= score < 70
+        undocumented: 0, // score < 30
+      },
+      // 성능 통계 (NEW)
+      performance: {
+        withCaching: 0,
+        withPagination: 0,
+        highLatency: 0,
+        mediumLatency: 0,
+        lowLatency: 0,
+      },
+      // 엔드포인트 유형 (NEW)
+      types: {
+        rest: 0,
+        graphql: 0,
+        websocket: 0,
+        grpc: 0,
+      },
+      // 분석 시간
+      analysisTimeMs: 0,
     };
     
+    let totalComplexity = 0;
+    let totalDocScore = 0;
+    
     for (const ep of endpoints) {
+      // 기본 통계
       stats.byMethod[ep.method] = (stats.byMethod[ep.method] || 0) + 1;
       stats.byFramework[ep.framework] = (stats.byFramework[ep.framework] || 0) + 1;
+      
+      // 인증 통계
+      const authType = ep.auth || 'none';
+      stats.byAuth[authType] = (stats.byAuth[authType] || 0) + 1;
+      
+      // 엔드포인트 유형 통계
+      if (ep.framework === 'graphql') {
+        stats.types.graphql++;
+      } else if (ep.framework === 'socket.io' || ep.framework === 'websocket') {
+        stats.types.websocket++;
+      } else if (ep.framework === 'grpc') {
+        stats.types.grpc++;
+      } else {
+        stats.types.rest++;
+      }
+      
+      // 보안 통계
+      if (ep.securityAnalysis) {
+        if (ep.securityAnalysis.hasAuth) {
+          stats.security.endpointsWithAuth++;
+        } else {
+          stats.security.endpointsWithoutAuth++;
+        }
+        if (ep.securityAnalysis.hasInputValidation) {
+          stats.security.endpointsWithValidation++;
+        }
+        if (ep.securityAnalysis.hasRateLimit) {
+          stats.security.endpointsWithRateLimit++;
+        }
+        for (const issue of ep.securityAnalysis.issues) {
+          stats.security.totalSecurityIssues++;
+          stats.security.issuesBySeverity[issue.severity]++;
+        }
+      }
+      
+      // 복잡도 통계
+      if (ep.complexity) {
+        totalComplexity += ep.complexity.score;
+        if (ep.complexity.score <= 3) {
+          stats.complexity.distribution.low++;
+        } else if (ep.complexity.score <= 6) {
+          stats.complexity.distribution.medium++;
+        } else {
+          stats.complexity.distribution.high++;
+        }
+      }
+      
+      // 문서화 통계
+      if (ep.documentationScore) {
+        totalDocScore += ep.documentationScore.score;
+        if (ep.documentationScore.score >= 70) {
+          stats.documentation.wellDocumented++;
+        } else if (ep.documentationScore.score >= 30) {
+          stats.documentation.partiallyDocumented++;
+        } else {
+          stats.documentation.undocumented++;
+        }
+      }
+      
+      // 성능 통계
+      if (ep.performance) {
+        if (ep.performance.hasCaching) stats.performance.withCaching++;
+        if (ep.performance.hasPagination) stats.performance.withPagination++;
+        if (ep.performance.estimatedLatency === 'high') stats.performance.highLatency++;
+        else if (ep.performance.estimatedLatency === 'medium') stats.performance.mediumLatency++;
+        else stats.performance.lowLatency++;
+      }
     }
+    
+    // 평균 계산
+    if (endpoints.length > 0) {
+      stats.complexity.average = Math.round((totalComplexity / endpoints.length) * 10) / 10;
+      stats.documentation.averageScore = Math.round(totalDocScore / endpoints.length);
+    }
+    
+    // 가장 복잡한 엔드포인트 상위 5개
+    stats.complexity.mostComplex = endpoints
+      .filter(ep => ep.complexity)
+      .sort((a, b) => (b.complexity?.score || 0) - (a.complexity?.score || 0))
+      .slice(0, 5)
+      .map(ep => ({
+        path: ep.path,
+        method: ep.method,
+        score: ep.complexity?.score || 0,
+      }));
+    
+    stats.analysisTimeMs = Date.now() - startTime;
     
     return NextResponse.json({
       endpoints,
@@ -3152,6 +3665,270 @@ function parseWebSocketEndpoints(projectPath: string): ApiEndpoint[] {
     } catch (e) {}
   }
   
+  scanDir(projectPath);
+  return endpoints;
+}
+
+// gRPC 엔드포인트 감지 (Protocol Buffers)
+function parseGrpcEndpoints(projectPath: string): ApiEndpoint[] {
+  const endpoints: ApiEndpoint[] = [];
+  
+  function scanDir(dir: string, depth: number = 0) {
+    if (depth > 6) return;
+    
+    try {
+      if (!existsSync(dir)) return;
+      const entries = readdirSync(dir);
+      
+      for (const entry of entries) {
+        if (['node_modules', '.git', 'dist', 'build', 'vendor'].includes(entry)) continue;
+        
+        const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        
+        if (stat.isDirectory()) {
+          scanDir(fullPath, depth + 1);
+        } else if (entry.endsWith('.proto')) {
+          try {
+            const content = readFileSync(fullPath, 'utf-8');
+            const relativePath = relative(projectPath, fullPath);
+            
+            // Package name
+            const packageMatch = content.match(/package\s+([^;]+);/);
+            const packageName = packageMatch ? packageMatch[1].trim() : '';
+            
+            // Service definitions
+            const serviceMatches = content.matchAll(/service\s+(\w+)\s*\{([^}]+)\}/g);
+            for (const sm of serviceMatches) {
+              const serviceName = sm[1];
+              const serviceBody = sm[2];
+              
+              // RPC methods
+              const rpcMatches = serviceBody.matchAll(/rpc\s+(\w+)\s*\(\s*(\w+)\s*\)\s*returns\s*\(\s*(?:stream\s+)?(\w+)\s*\)/g);
+              for (const rm of rpcMatches) {
+                const methodName = rm[1];
+                const requestType = rm[2];
+                const responseType = rm[3];
+                const isStream = serviceBody.includes(`stream ${responseType}`) || serviceBody.includes(`stream ${requestType}`);
+                
+                // Extract comments above the rpc
+                const beforeRpc = serviceBody.substring(0, serviceBody.indexOf(`rpc ${methodName}`));
+                const commentMatch = beforeRpc.match(/\/\/\s*(.+)\s*$/m);
+                const description = commentMatch ? commentMatch[1].trim() : undefined;
+                
+                endpoints.push({
+                  id: `gRPC-${serviceName}-${methodName}`,
+                  method: 'POST', // gRPC uses HTTP/2 POST
+                  path: `/${packageName ? packageName + '.' : ''}${serviceName}/${methodName}`,
+                  filePath: relativePath,
+                  fileName: entry,
+                  handler: methodName,
+                  params: [],
+                  parameters: [
+                    {
+                      name: 'request',
+                      type: requestType,
+                      required: true,
+                      in: 'body',
+                      description: `gRPC request message: ${requestType}`,
+                    }
+                  ],
+                  requestBody: {
+                    contentType: 'application/grpc',
+                    schema: requestType,
+                    required: true,
+                  },
+                  responses: [
+                    {
+                      statusCode: 200,
+                      contentType: 'application/grpc',
+                      schema: responseType,
+                      description: isStream ? `Stream of ${responseType}` : responseType,
+                    }
+                  ],
+                  description: description || `gRPC ${isStream ? 'streaming ' : ''}method: ${serviceName}.${methodName}`,
+                  summary: `${serviceName}/${methodName}`,
+                  isAsync: true,
+                  lineNumber: 1,
+                  framework: 'grpc',
+                  tags: ['gRPC', serviceName, ...(isStream ? ['Streaming'] : [])],
+                  contentType: 'application/grpc',
+                });
+              }
+            }
+            
+            // Message types (for reference)
+            const messageMatches = content.matchAll(/message\s+(\w+)\s*\{([^}]+)\}/g);
+            for (const mm of messageMatches) {
+              // Could be used to enrich schema information
+              // For now, we just detect services
+            }
+            
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+  }
+  
+  scanDir(projectPath);
+  return endpoints;
+}
+
+// Kotlin/Ktor 엔드포인트 감지
+function parseKtorRoutes(projectPath: string): ApiEndpoint[] {
+  const endpoints: ApiEndpoint[] = [];
+  
+  function scanDir(dir: string, depth: number = 0) {
+    if (depth > 6) return;
+    
+    try {
+      if (!existsSync(dir)) return;
+      const entries = readdirSync(dir);
+      
+      for (const entry of entries) {
+        if (['node_modules', '.git', 'build', 'out', '.gradle', 'target'].includes(entry)) continue;
+        
+        const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        
+        if (stat.isDirectory()) {
+          scanDir(fullPath, depth + 1);
+        } else if (entry.endsWith('.kt') || entry.endsWith('.kts')) {
+          try {
+            const content = readFileSync(fullPath, 'utf-8');
+            const relativePath = relative(projectPath, fullPath);
+            
+            // Ktor: get("/path"), post("/path"), route("/path")
+            const ktorRegex = /(get|post|put|patch|delete|route)\s*\(\s*["']([^"']+)["']\s*\)/gi;
+            let match;
+            while ((match = ktorRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase();
+              if (method === 'ROUTE') continue; // route is for grouping
+              const path = match[2];
+              
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `KTOR-${method}-${path}-${lineNumber}`,
+                method: method as ApiEndpoint['method'],
+                path,
+                filePath: relativePath,
+                fileName: entry,
+                handler: 'ktorHandler',
+                params: (path.match(/\{(\w+)\}/g) || []).map(p => p.slice(1, -1)),
+                isAsync: true,
+                lineNumber,
+                framework: 'ktor',
+                tags: ['Kotlin', 'Ktor'],
+              });
+            }
+            
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+  }
+  
+  scanDir(join(projectPath, 'src'));
+  scanDir(projectPath);
+  return endpoints;
+}
+
+// Elixir/Phoenix 엔드포인트 감지
+function parsePhoenixRoutes(projectPath: string): ApiEndpoint[] {
+  const endpoints: ApiEndpoint[] = [];
+  
+  function scanDir(dir: string, depth: number = 0) {
+    if (depth > 6) return;
+    
+    try {
+      if (!existsSync(dir)) return;
+      const entries = readdirSync(dir);
+      
+      for (const entry of entries) {
+        if (['deps', '_build', '.git', 'node_modules'].includes(entry)) continue;
+        
+        const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        
+        if (stat.isDirectory()) {
+          scanDir(fullPath, depth + 1);
+        } else if (entry === 'router.ex' || entry.endsWith('_router.ex')) {
+          try {
+            const content = readFileSync(fullPath, 'utf-8');
+            const relativePath = relative(projectPath, fullPath);
+            
+            // Phoenix: get "/path", Controller, :action
+            const phoenixRegex = /(get|post|put|patch|delete)\s+["']([^"']+)["']\s*,\s*(\w+)(?:Controller)?\s*,\s*:(\w+)/gi;
+            let match;
+            while ((match = phoenixRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[2];
+              const controller = match[3];
+              const action = match[4];
+              
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `PHOENIX-${method}-${path}-${lineNumber}`,
+                method,
+                path,
+                filePath: relativePath,
+                fileName: entry,
+                handler: `${controller}.${action}`,
+                params: (path.match(/:(\w+)/g) || []).map(p => p.slice(1)),
+                isAsync: true,
+                lineNumber,
+                framework: 'phoenix',
+                tags: ['Elixir', 'Phoenix'],
+              });
+            }
+            
+            // resources macro: resources "/users", UserController
+            const resourcesRegex = /resources\s+["']([^"']+)["']\s*,\s*(\w+)(?:Controller)?/gi;
+            while ((match = resourcesRegex.exec(content)) !== null) {
+              const basePath = match[1];
+              const controller = match[2];
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              // RESTful resources generate: index, show, new, edit, create, update, delete
+              const resourceActions = [
+                { method: 'GET', path: basePath, action: 'index' },
+                { method: 'GET', path: `${basePath}/new`, action: 'new' },
+                { method: 'GET', path: `${basePath}/:id`, action: 'show' },
+                { method: 'GET', path: `${basePath}/:id/edit`, action: 'edit' },
+                { method: 'POST', path: basePath, action: 'create' },
+                { method: 'PUT', path: `${basePath}/:id`, action: 'update' },
+                { method: 'DELETE', path: `${basePath}/:id`, action: 'delete' },
+              ];
+              
+              for (const ra of resourceActions) {
+                endpoints.push({
+                  id: `PHOENIX-${ra.method}-${ra.path}-${lineNumber}`,
+                  method: ra.method as ApiEndpoint['method'],
+                  path: ra.path,
+                  filePath: relativePath,
+                  fileName: entry,
+                  handler: `${controller}.${ra.action}`,
+                  params: ra.path.includes(':id') ? ['id'] : [],
+                  isAsync: true,
+                  lineNumber,
+                  framework: 'phoenix',
+                  tags: ['Elixir', 'Phoenix', 'RESTful'],
+                });
+              }
+            }
+            
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+  }
+  
+  scanDir(join(projectPath, 'lib'));
   scanDir(projectPath);
   return endpoints;
 }
