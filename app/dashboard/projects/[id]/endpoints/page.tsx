@@ -36,7 +36,22 @@ import {
   Unlock,
   Clock,
   History,
-  Zap
+  Zap,
+  // v3 icons
+  Shield,
+  FileText,
+  Gauge,
+  Activity,
+  GitBranch,
+  Layers,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Info,
+  Heart,
+  TrendingUp,
+  Box,
+  Link2
 } from 'lucide-react';
 
 interface ApiParameter {
@@ -96,6 +111,84 @@ interface ApiEndpoint {
     strategy?: string;
   };
   apiVersion?: string;
+  // v1 분석 필드
+  complexity?: {
+    score: number;
+    factors: string[];
+    cyclomaticComplexity?: number;
+  };
+  documentationScore?: {
+    score: number;
+    hasDescription: boolean;
+    hasParameterDocs: boolean;
+    hasResponseDocs: boolean;
+    hasExamples: boolean;
+  };
+  securityAnalysis?: {
+    issues: { severity: 'low' | 'medium' | 'high' | 'critical'; message: string; recommendation: string }[];
+    hasAuth: boolean;
+    hasRateLimit: boolean;
+    hasInputValidation: boolean;
+    hasSanitization: boolean;
+  };
+  performance?: {
+    hasCaching: boolean;
+    hasCompression: boolean;
+    hasPagination: boolean;
+    estimatedLatency?: 'low' | 'medium' | 'high';
+  };
+  // v2 분석 필드
+  namingConvention?: {
+    followsRESTful: boolean;
+    usesKebabCase: boolean;
+    usesCamelCase: boolean;
+    usesSnakeCase: boolean;
+    issues: string[];
+    score: number;
+  };
+  consistency?: {
+    responseFormat: string;
+    errorHandling: string;
+    versioningStyle: string;
+  };
+  healthScore?: {
+    overall: number;
+    security: number;
+    documentation: number;
+    performance: number;
+    naming: number;
+  };
+  changeRisk?: {
+    level: 'low' | 'medium' | 'high';
+    breakingChangeRisk: boolean;
+    dependentEndpoints: string[];
+  };
+  // v3 분석 필드
+  similarity?: {
+    similarEndpoints: { path: string; method: string; score: number }[];
+    potentialDuplicate: boolean;
+  };
+  mockData?: {
+    responseExample: string;
+    requestExample?: string;
+    generatedAt?: string;
+  };
+  sdkSnippets?: {
+    typescript?: string;
+    python?: string;
+    curl?: string;
+    javascript?: string;
+  };
+  dependencies?: {
+    callsEndpoints: string[];
+    calledByEndpoints: string[];
+    externalApis: string[];
+  };
+  usageHints?: {
+    recommendedHeaders: { name: string; value: string; description: string }[];
+    commonErrors: { code: number; message: string; solution: string }[];
+    bestPractices: string[];
+  };
 }
 
 interface ApiGroup {
@@ -136,6 +229,7 @@ export default function ApiEndpointsPage() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [detailTab, setDetailTab] = useState<'info' | 'analysis' | 'sdk' | 'mock' | 'deps'>('info');
   
   // 즐겨찾기 (localStorage)
   const [favorites, setFavorites] = useState<Set<string>>(() => {
@@ -757,302 +851,486 @@ export default function ApiEndpointsPage() {
           {selectedEndpoint && (
             <motion.aside
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 350, opacity: 1 }}
+              animate={{ width: 420, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              className="border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden flex-shrink-0"
+              className="border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden flex-shrink-0 flex flex-col"
             >
-              <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                <h3 className="font-semibold text-gray-900 dark:text-white">엔드포인트 상세</h3>
-                <button
-                  onClick={() => setSelectedEndpoint(null)}
-                  className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="p-4 space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 12rem)' }}>
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
+              {/* Header with Health Score */}
+              <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
                     <span className={`px-3 py-1 text-sm font-bold rounded ${methodColors[selectedEndpoint.method].bg} ${methodColors[selectedEndpoint.method].text}`}>
                       {selectedEndpoint.method}
                     </span>
-                    {selectedEndpoint.isAsync && (
-                      <span className="px-2 py-0.5 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-600 rounded">
-                        async
-                      </span>
+                    {selectedEndpoint.healthScore && (
+                      <div className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                        selectedEndpoint.healthScore.overall >= 80 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                        selectedEndpoint.healthScore.overall >= 60 ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                        selectedEndpoint.healthScore.overall >= 40 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                        'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                      }`}>
+                        <Heart className="w-3 h-3" />
+                        {selectedEndpoint.healthScore.overall}
+                      </div>
                     )}
                   </div>
-                  <p className="font-mono text-lg text-gray-900 dark:text-white break-all">
-                    {selectedEndpoint.path}
-                  </p>
+                  <button
+                    onClick={() => setSelectedEndpoint(null)}
+                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
-                
-                <div>
-                  <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">파일</h4>
-                  <p className="text-sm text-gray-600 dark:text-gray-300 font-mono break-all">
-                    {selectedEndpoint.filePath}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">Line {selectedEndpoint.lineNumber}</p>
-                </div>
-                
-                <div>
-                  <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">핸들러</h4>
-                  <p className="text-sm text-gray-600 dark:text-gray-300 font-mono">
-                    {selectedEndpoint.handler}
-                  </p>
-                </div>
-                
-                {selectedEndpoint.params.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">경로 파라미터</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedEndpoint.params.map(param => (
-                        <span key={param} className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-600 text-sm rounded font-mono">
-                          {param}
-                        </span>
-                      ))}
+                <p className="font-mono text-sm text-gray-900 dark:text-white break-all">
+                  {selectedEndpoint.path}
+                </p>
+              </div>
+              
+              {/* Tabs */}
+              <div className="flex border-b border-gray-200 dark:border-gray-700 flex-shrink-0 overflow-x-auto">
+                {[
+                  { key: 'info', label: '정보', icon: Info },
+                  { key: 'analysis', label: '분석', icon: Activity },
+                  { key: 'sdk', label: 'SDK', icon: Code2 },
+                  { key: 'mock', label: 'Mock', icon: Box },
+                  { key: 'deps', label: '의존성', icon: GitBranch },
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setDetailTab(tab.key as typeof detailTab)}
+                    className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition whitespace-nowrap border-b-2 ${
+                      detailTab === tab.key
+                        ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                    }`}
+                  >
+                    <tab.icon className="w-3.5 h-3.5" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {/* 정보 탭 */}
+                {detailTab === 'info' && (
+                  <>
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">파일</h4>
+                      <p className="text-sm text-gray-600 dark:text-gray-300 font-mono break-all">
+                        {selectedEndpoint.filePath}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">Line {selectedEndpoint.lineNumber}</p>
                     </div>
+                    
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">핸들러</h4>
+                      <p className="text-sm text-gray-600 dark:text-gray-300 font-mono">
+                        {selectedEndpoint.handler}
+                      </p>
+                    </div>
+                    
+                    {selectedEndpoint.params.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">경로 파라미터</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedEndpoint.params.map(param => (
+                            <span key={param} className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-600 text-sm rounded font-mono">
+                              {param}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {selectedEndpoint.description && (
+                      <div>
+                        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">설명</h4>
+                        <p className="text-sm text-gray-600 dark:text-gray-300">
+                          {selectedEndpoint.description}
+                        </p>
+                      </div>
+                    )}
+                    
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">프레임워크</h4>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-sm rounded uppercase">
+                          {selectedEndpoint.framework}
+                        </span>
+                        {selectedEndpoint.apiVersion && (
+                          <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-600 text-xs rounded">
+                            {selectedEndpoint.apiVersion}
+                          </span>
+                        )}
+                        {selectedEndpoint.deprecated && (
+                          <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-600 text-xs rounded">
+                            Deprecated
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {selectedEndpoint.auth && (
+                      <div>
+                        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">인증</h4>
+                        <span className={`px-2 py-1 text-xs rounded flex items-center gap-1 w-fit ${
+                          selectedEndpoint.auth === 'none' 
+                            ? 'bg-green-100 dark:bg-green-900/30 text-green-600' 
+                            : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600'
+                        }`}>
+                          <Lock className="w-3 h-3" />
+                          {selectedEndpoint.auth.toUpperCase()}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {selectedEndpoint.tags && selectedEndpoint.tags.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">태그</h4>
+                        <div className="flex flex-wrap gap-1">
+                          {selectedEndpoint.tags.map((tag, idx) => (
+                            <span key={idx} className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 text-xs rounded">
+                              #{tag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div className="pt-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
+                      <button
+                        onClick={() => copyToClipboard(selectedEndpoint.path, 'detail')}
+                        className="w-full py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition flex items-center justify-center gap-2"
+                      >
+                        {copied === 'detail' ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                        경로 복사
+                      </button>
+                      <button
+                        onClick={() => navigateToCodeElement(selectedEndpoint)}
+                        className="w-full py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 transition flex items-center justify-center gap-2"
+                      >
+                        <Code2 className="w-4 h-4" />
+                        코드 요소에서 보기
+                      </button>
+                    </div>
+                  </>
+                )}
+                
+                {/* 분석 탭 */}
+                {detailTab === 'analysis' && (
+                  <>
+                    {/* 헬스 스코어 대시보드 */}
+                    {selectedEndpoint.healthScore && (
+                      <div className="bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-700/50 dark:to-gray-800/50 rounded-xl p-4">
+                        <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3 flex items-center gap-1">
+                          <Heart className="w-3.5 h-3.5" /> API 헬스 스코어
+                        </h4>
+                        <div className="grid grid-cols-5 gap-2 text-center">
+                          {[
+                            { label: '전체', value: selectedEndpoint.healthScore.overall, key: 'overall' },
+                            { label: '보안', value: selectedEndpoint.healthScore.security, key: 'security' },
+                            { label: '문서', value: selectedEndpoint.healthScore.documentation, key: 'docs' },
+                            { label: '성능', value: selectedEndpoint.healthScore.performance, key: 'perf' },
+                            { label: '네이밍', value: selectedEndpoint.healthScore.naming, key: 'naming' },
+                          ].map(item => (
+                            <div key={item.key} className={`rounded-lg p-2 ${
+                              item.value >= 80 ? 'bg-green-100 dark:bg-green-900/30' :
+                              item.value >= 60 ? 'bg-blue-100 dark:bg-blue-900/30' :
+                              item.value >= 40 ? 'bg-yellow-100 dark:bg-yellow-900/30' :
+                              'bg-red-100 dark:bg-red-900/30'
+                            }`}>
+                              <div className={`text-lg font-bold ${
+                                item.value >= 80 ? 'text-green-600 dark:text-green-400' :
+                                item.value >= 60 ? 'text-blue-600 dark:text-blue-400' :
+                                item.value >= 40 ? 'text-yellow-600 dark:text-yellow-400' :
+                                'text-red-600 dark:text-red-400'
+                              }`}>{item.value}</div>
+                              <div className="text-[10px] text-gray-500">{item.label}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* 복잡도 */}
+                    {selectedEndpoint.complexity && (
+                      <div>
+                        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                          <Gauge className="w-3.5 h-3.5" /> 복잡도
+                        </h4>
+                        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className={`text-2xl font-bold ${
+                              selectedEndpoint.complexity.score <= 3 ? 'text-green-600' :
+                              selectedEndpoint.complexity.score <= 6 ? 'text-yellow-600' :
+                              'text-red-600'
+                            }`}>{selectedEndpoint.complexity.score}</span>
+                            <span className="text-xs text-gray-500">/ 10</span>
+                          </div>
+                          {selectedEndpoint.complexity.factors.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {selectedEndpoint.complexity.factors.map((f, i) => (
+                                <span key={i} className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 text-[10px] rounded">
+                                  {f}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* 보안 분석 */}
+                    {selectedEndpoint.securityAnalysis && (
+                      <div>
+                        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                          <Shield className="w-3.5 h-3.5" /> 보안 분석
+                        </h4>
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className={`flex items-center gap-1.5 text-xs p-2 rounded ${selectedEndpoint.securityAnalysis.hasAuth ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                              {selectedEndpoint.securityAnalysis.hasAuth ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                              인증
+                            </div>
+                            <div className={`flex items-center gap-1.5 text-xs p-2 rounded ${selectedEndpoint.securityAnalysis.hasRateLimit ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                              {selectedEndpoint.securityAnalysis.hasRateLimit ? <CheckCircle className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                              Rate Limit
+                            </div>
+                            <div className={`flex items-center gap-1.5 text-xs p-2 rounded ${selectedEndpoint.securityAnalysis.hasInputValidation ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                              {selectedEndpoint.securityAnalysis.hasInputValidation ? <CheckCircle className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                              입력 검증
+                            </div>
+                            <div className={`flex items-center gap-1.5 text-xs p-2 rounded ${selectedEndpoint.securityAnalysis.hasSanitization ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                              {selectedEndpoint.securityAnalysis.hasSanitization ? <CheckCircle className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+                              정화
+                            </div>
+                          </div>
+                          {selectedEndpoint.securityAnalysis.issues.length > 0 && (
+                            <div className="space-y-1 mt-2">
+                              {selectedEndpoint.securityAnalysis.issues.slice(0, 3).map((issue, i) => (
+                                <div key={i} className={`text-xs p-2 rounded ${
+                                  issue.severity === 'critical' ? 'bg-red-100 text-red-800' :
+                                  issue.severity === 'high' ? 'bg-orange-100 text-orange-800' :
+                                  issue.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                                  'bg-blue-100 text-blue-800'
+                                }`}>
+                                  <span className="font-medium uppercase">{issue.severity}</span>: {issue.message}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* 변경 위험도 */}
+                    {selectedEndpoint.changeRisk && (
+                      <div>
+                        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                          <AlertTriangle className="w-3.5 h-3.5" /> 변경 위험도
+                        </h4>
+                        <div className={`p-3 rounded-lg ${
+                          selectedEndpoint.changeRisk.level === 'high' ? 'bg-red-50 dark:bg-red-900/20' :
+                          selectedEndpoint.changeRisk.level === 'medium' ? 'bg-yellow-50 dark:bg-yellow-900/20' :
+                          'bg-green-50 dark:bg-green-900/20'
+                        }`}>
+                          <span className={`text-sm font-medium ${
+                            selectedEndpoint.changeRisk.level === 'high' ? 'text-red-600' :
+                            selectedEndpoint.changeRisk.level === 'medium' ? 'text-yellow-600' :
+                            'text-green-600'
+                          }`}>
+                            {selectedEndpoint.changeRisk.level.toUpperCase()}
+                          </span>
+                          {selectedEndpoint.changeRisk.breakingChangeRisk && (
+                            <span className="ml-2 px-1.5 py-0.5 bg-red-200 text-red-800 text-[10px] rounded">
+                              Breaking Change 위험
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+                
+                {/* SDK 탭 */}
+                {detailTab === 'sdk' && selectedEndpoint.sdkSnippets && (
+                  <div className="space-y-4">
+                    {[
+                      { key: 'curl', label: 'cURL', code: selectedEndpoint.sdkSnippets.curl },
+                      { key: 'typescript', label: 'TypeScript', code: selectedEndpoint.sdkSnippets.typescript },
+                      { key: 'python', label: 'Python', code: selectedEndpoint.sdkSnippets.python },
+                      { key: 'javascript', label: 'JavaScript (Axios)', code: selectedEndpoint.sdkSnippets.javascript },
+                    ].map(snippet => snippet.code && (
+                      <div key={snippet.key}>
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-xs font-semibold text-gray-400 uppercase">{snippet.label}</h4>
+                          <button
+                            onClick={() => copyToClipboard(snippet.code || '', `sdk-${snippet.key}`)}
+                            className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                          >
+                            {copied === `sdk-${snippet.key}` ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                            복사
+                          </button>
+                        </div>
+                        <pre className="bg-gray-900 text-green-400 text-xs p-3 rounded-lg overflow-x-auto max-h-40">
+                          {snippet.code}
+                        </pre>
+                      </div>
+                    ))}
                   </div>
                 )}
                 
-                {selectedEndpoint.description && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">설명</h4>
-                    <p className="text-sm text-gray-600 dark:text-gray-300">
-                      {selectedEndpoint.description}
+                {/* Mock 탭 */}
+                {detailTab === 'mock' && selectedEndpoint.mockData && (
+                  <div className="space-y-4">
+                    {selectedEndpoint.mockData.requestExample && (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-xs font-semibold text-gray-400 uppercase">요청 예시</h4>
+                          <button
+                            onClick={() => copyToClipboard(selectedEndpoint.mockData?.requestExample || '', 'mock-req')}
+                            className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                          >
+                            {copied === 'mock-req' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                            복사
+                          </button>
+                        </div>
+                        <pre className="bg-blue-900 text-blue-200 text-xs p-3 rounded-lg overflow-x-auto max-h-48">
+                          {selectedEndpoint.mockData.requestExample}
+                        </pre>
+                      </div>
+                    )}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-xs font-semibold text-gray-400 uppercase">응답 예시</h4>
+                        <button
+                          onClick={() => copyToClipboard(selectedEndpoint.mockData?.responseExample || '', 'mock-res')}
+                          className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                        >
+                          {copied === 'mock-res' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                          복사
+                        </button>
+                      </div>
+                      <pre className="bg-gray-900 text-green-400 text-xs p-3 rounded-lg overflow-x-auto max-h-60">
+                        {selectedEndpoint.mockData.responseExample}
+                      </pre>
+                    </div>
+                    <p className="text-[10px] text-gray-400 text-right">
+                      생성: {selectedEndpoint.mockData.generatedAt ? new Date(selectedEndpoint.mockData.generatedAt).toLocaleString() : 'N/A'}
                     </p>
                   </div>
                 )}
                 
-                <div>
-                  <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">프레임워크</h4>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-sm rounded uppercase">
-                      {selectedEndpoint.framework}
-                    </span>
-                    {selectedEndpoint.apiVersion && (
-                      <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 text-xs rounded">
-                        {selectedEndpoint.apiVersion}
-                      </span>
-                    )}
-                    {selectedEndpoint.deprecated && (
-                      <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs rounded">
-                        Deprecated
-                      </span>
-                    )}
-                  </div>
-                </div>
-                
-                {/* 인증 정보 */}
-                {selectedEndpoint.auth && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">인증</h4>
-                    <span className={`px-2 py-1 text-xs rounded ${
-                      selectedEndpoint.auth === 'none' 
-                        ? 'bg-green-100 dark:bg-green-900/30 text-green-600' 
-                        : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600'
-                    }`}>
-                      <Lock className="w-3 h-3 inline mr-1" />
-                      {selectedEndpoint.auth.toUpperCase()}
-                    </span>
-                  </div>
-                )}
-                
-                {/* 상세 파라미터 테이블 */}
-                {selectedEndpoint.parameters && selectedEndpoint.parameters.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">파라미터 상세</h4>
-                    <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                      <table className="w-full text-xs">
-                        <thead className="bg-gray-50 dark:bg-gray-800">
-                          <tr>
-                            <th className="px-2 py-1.5 text-left font-medium text-gray-500">이름</th>
-                            <th className="px-2 py-1.5 text-left font-medium text-gray-500">타입</th>
-                            <th className="px-2 py-1.5 text-left font-medium text-gray-500">위치</th>
-                            <th className="px-2 py-1.5 text-center font-medium text-gray-500">필수</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                          {selectedEndpoint.parameters.map((param, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                              <td className="px-2 py-1.5 font-mono text-blue-600 dark:text-blue-400">{param.name}</td>
-                              <td className="px-2 py-1.5 text-gray-600 dark:text-gray-400">{param.type}</td>
-                              <td className="px-2 py-1.5">
-                                <span className={`px-1.5 py-0.5 rounded text-xs ${
-                                  param.in === 'path' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                                  param.in === 'query' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                                  param.in === 'header' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' :
-                                  'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                                }`}>
-                                  {param.in}
-                                </span>
-                              </td>
-                              <td className="px-2 py-1.5 text-center">
-                                {param.required ? (
-                                  <span className="text-red-500">✓</span>
-                                ) : (
-                                  <span className="text-gray-400">-</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-                
-                {/* 요청 바디 */}
-                {selectedEndpoint.requestBody && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">요청 바디</h4>
-                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Content-Type:</span>
-                        <code className="text-xs bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded">
-                          {selectedEndpoint.requestBody.contentType}
-                        </code>
-                        {selectedEndpoint.requestBody.required && (
-                          <span className="text-xs text-red-500">필수</span>
+                {/* 의존성 탭 */}
+                {detailTab === 'deps' && (
+                  <div className="space-y-4">
+                    {selectedEndpoint.dependencies && (
+                      <>
+                        {selectedEndpoint.dependencies.callsEndpoints.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                              <TrendingUp className="w-3.5 h-3.5" /> 호출하는 엔드포인트
+                            </h4>
+                            <div className="space-y-1">
+                              {selectedEndpoint.dependencies.callsEndpoints.map((ep, i) => (
+                                <div key={i} className="flex items-center gap-2 text-xs bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
+                                  <Link2 className="w-3 h-3 text-blue-500" />
+                                  <code className="text-blue-700 dark:text-blue-400">{ep}</code>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         )}
-                      </div>
-                      {selectedEndpoint.requestBody.schema && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-500">스키마:</span>
-                          <code className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded">
-                            {selectedEndpoint.requestBody.schema}
-                          </code>
-                        </div>
-                      )}
-                      {selectedEndpoint.requestBody.example && (
-                        <div>
-                          <span className="text-xs text-gray-500">예제:</span>
-                          <pre className="mt-1 text-xs bg-gray-900 text-green-400 p-2 rounded overflow-x-auto">
-                            {selectedEndpoint.requestBody.example}
-                          </pre>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-                
-                {/* 응답 정보 */}
-                {selectedEndpoint.responses && selectedEndpoint.responses.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">응답</h4>
-                    <div className="space-y-1">
-                      {selectedEndpoint.responses.map((resp, idx) => (
-                        <div key={idx} className="flex items-center gap-2 text-xs">
-                          <span className={`px-1.5 py-0.5 rounded font-mono ${
-                            resp.statusCode >= 200 && resp.statusCode < 300 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                            resp.statusCode >= 400 && resp.statusCode < 500 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                            resp.statusCode >= 500 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
-                            'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-400'
-                          }`}>
-                            {resp.statusCode}
-                          </span>
-                          <span className="text-gray-600 dark:text-gray-400">{resp.description}</span>
-                          {resp.contentType && (
-                            <code className="text-gray-400">{resp.contentType}</code>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                
-                {/* 유효성 검증 */}
-                {selectedEndpoint.validation && selectedEndpoint.validation.rules.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">유효성 검증</h4>
-                    <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-2 space-y-1">
-                      {selectedEndpoint.validation.schema && (
-                        <div className="text-xs text-gray-500 mb-2">
-                          스키마: <code className="text-purple-600">{selectedEndpoint.validation.schema}</code>
-                        </div>
-                      )}
-                      {selectedEndpoint.validation.rules.slice(0, 5).map((rule, idx) => (
-                        <div key={idx} className="text-xs flex items-center gap-2">
-                          <span className="font-mono text-blue-600 dark:text-blue-400">{rule.field}</span>
-                          <span className="text-gray-400">→</span>
-                          <code className="text-gray-600 dark:text-gray-400">{rule.rule}</code>
-                        </div>
-                      ))}
-                      {selectedEndpoint.validation.rules.length > 5 && (
-                        <div className="text-xs text-gray-400">
-                          +{selectedEndpoint.validation.rules.length - 5}개 더...
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-                
-                {/* 레이트 리밋 & 캐시 */}
-                {(selectedEndpoint.rateLimit || selectedEndpoint.cache) && (
-                  <div className="flex gap-4">
-                    {selectedEndpoint.rateLimit && (
-                      <div className="flex-1 bg-orange-50 dark:bg-orange-900/20 rounded-lg p-2">
-                        <div className="text-xs text-orange-600 dark:text-orange-400 font-medium mb-1">레이트 리밋</div>
-                        <div className="text-sm text-orange-800 dark:text-orange-300">
-                          {selectedEndpoint.rateLimit.limit}/{selectedEndpoint.rateLimit.window}
-                        </div>
-                      </div>
+                        
+                        {selectedEndpoint.dependencies.calledByEndpoints.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                              <GitBranch className="w-3.5 h-3.5" /> 호출되는 곳
+                            </h4>
+                            <div className="space-y-1">
+                              {selectedEndpoint.dependencies.calledByEndpoints.map((ep, i) => (
+                                <div key={i} className="flex items-center gap-2 text-xs bg-green-50 dark:bg-green-900/20 p-2 rounded">
+                                  <Link2 className="w-3 h-3 text-green-500" />
+                                  <code className="text-green-700 dark:text-green-400">{ep}</code>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {selectedEndpoint.dependencies.externalApis.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                              <ExternalLink className="w-3.5 h-3.5" /> 외부 API
+                            </h4>
+                            <div className="space-y-1">
+                              {selectedEndpoint.dependencies.externalApis.map((api, i) => (
+                                <div key={i} className="flex items-center gap-2 text-xs bg-purple-50 dark:bg-purple-900/20 p-2 rounded">
+                                  <Globe className="w-3 h-3 text-purple-500" />
+                                  <span className="text-purple-700 dark:text-purple-400">{api}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {selectedEndpoint.dependencies.callsEndpoints.length === 0 && 
+                         selectedEndpoint.dependencies.calledByEndpoints.length === 0 && 
+                         selectedEndpoint.dependencies.externalApis.length === 0 && (
+                          <div className="text-center py-8 text-gray-400">
+                            <GitBranch className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">의존성 정보가 없습니다</p>
+                          </div>
+                        )}
+                      </>
                     )}
-                    {selectedEndpoint.cache && (
-                      <div className="flex-1 bg-cyan-50 dark:bg-cyan-900/20 rounded-lg p-2">
-                        <div className="text-xs text-cyan-600 dark:text-cyan-400 font-medium mb-1">캐시</div>
-                        <div className="text-sm text-cyan-800 dark:text-cyan-300">
-                          {selectedEndpoint.cache.ttl ? `TTL: ${selectedEndpoint.cache.ttl}s` : selectedEndpoint.cache.strategy}
-                        </div>
-                      </div>
+                    
+                    {/* 사용 힌트 */}
+                    {selectedEndpoint.usageHints && (
+                      <>
+                        {selectedEndpoint.usageHints.recommendedHeaders.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">권장 헤더</h4>
+                            <div className="space-y-1">
+                              {selectedEndpoint.usageHints.recommendedHeaders.map((h, i) => (
+                                <div key={i} className="text-xs bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                                  <code className="text-blue-600">{h.name}</code>: <span className="text-gray-500">{h.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {selectedEndpoint.usageHints.commonErrors.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">일반적인 에러</h4>
+                            <div className="space-y-1">
+                              {selectedEndpoint.usageHints.commonErrors.slice(0, 3).map((e, i) => (
+                                <div key={i} className="text-xs bg-red-50 dark:bg-red-900/20 p-2 rounded">
+                                  <span className="font-mono text-red-600">{e.code}</span> - {e.message}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {selectedEndpoint.usageHints.bestPractices.length > 0 && (
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">베스트 프랙티스</h4>
+                            <ul className="space-y-1">
+                              {selectedEndpoint.usageHints.bestPractices.slice(0, 3).map((p, i) => (
+                                <li key={i} className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-1.5">
+                                  <CheckCircle className="w-3 h-3 text-green-500 mt-0.5 flex-shrink-0" />
+                                  {p}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
-                
-                {/* 미들웨어 */}
-                {selectedEndpoint.middleware && selectedEndpoint.middleware.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">미들웨어</h4>
-                    <div className="flex flex-wrap gap-1">
-                      {selectedEndpoint.middleware.map((mw, idx) => (
-                        <span key={idx} className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs rounded">
-                          {mw}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                
-                {/* 태그 */}
-                {selectedEndpoint.tags && selectedEndpoint.tags.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2">태그</h4>
-                    <div className="flex flex-wrap gap-1">
-                      {selectedEndpoint.tags.map((tag, idx) => (
-                        <span key={idx} className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 text-xs rounded">
-                          #{tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                
-                <div className="pt-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
-                  <button
-                    onClick={() => copyToClipboard(selectedEndpoint.path, 'detail')}
-                    className="w-full py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm hover:bg-gray-200 dark:hover:bg-gray-600 transition flex items-center justify-center gap-2"
-                  >
-                    {copied === 'detail' ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                    경로 복사
-                  </button>
-                  <button
-                    onClick={() => navigateToCodeElement(selectedEndpoint)}
-                    className="w-full py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 transition flex items-center justify-center gap-2"
-                  >
-                    <Code2 className="w-4 h-4" />
-                    코드 요소에서 보기
-                  </button>
-                </div>
               </div>
             </motion.aside>
           )}
