@@ -11,6 +11,7 @@ interface ApiEndpoint {
   fileName: string;
   handler: string;
   params: string[];
+  queryParams?: string[];
   middleware?: string[];
   description?: string;
   requestBody?: string;
@@ -18,6 +19,11 @@ interface ApiEndpoint {
   isAsync: boolean;
   lineNumber: number;
   framework: string;
+  // 추가 메타데이터
+  auth?: 'jwt' | 'session' | 'apikey' | 'oauth' | 'none';
+  deprecated?: boolean;
+  tags?: string[];
+  statusCodes?: number[];
 }
 
 interface ApiGroup {
@@ -128,68 +134,184 @@ function parseNextJsAppRouter(projectPath: string): ApiEndpoint[] {
   return endpoints;
 }
 
-// Express.js 파싱
-function parseExpressRoutes(projectPath: string): ApiEndpoint[] {
+// TypeScript/JavaScript 파싱 (Express, NestJS, Fastify, Hono, Koa, etc.)
+function parseTypeScriptRoutes(projectPath: string): ApiEndpoint[] {
   const endpoints: ApiEndpoint[] = [];
   
-  function scanDir(dir: string) {
+  function scanDir(dir: string, depth: number = 0) {
+    if (depth > 8) return; // 깊이 제한
+    
     try {
+      if (!existsSync(dir)) return;
       const entries = readdirSync(dir);
       
       for (const entry of entries) {
-        if (['node_modules', '.git', 'dist', 'build'].includes(entry)) continue;
+        if (['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '__tests__', 'test'].includes(entry)) continue;
         
         const fullPath = join(dir, entry);
         const stat = statSync(fullPath);
         
         if (stat.isDirectory()) {
-          scanDir(fullPath);
-        } else if (['.js', '.ts'].includes(extname(entry))) {
-          const content = readFileSync(fullPath, 'utf-8');
-          const relativePath = relative(projectPath, fullPath);
-          
-          // Match: router.get('/path', ...), app.post('/path', ...)
-          const routeRegex = /(?:router|app)\.(get|post|put|patch|delete|options|head)\s*\(\s*['"`]([^'"`]+)['"`]/gi;
-          let match;
-          
-          while ((match = routeRegex.exec(content)) !== null) {
-            const method = match[1].toUpperCase() as ApiEndpoint['method'];
-            const path = match[2];
+          scanDir(fullPath, depth + 1);
+        } else if (['.js', '.ts', '.mjs', '.mts'].includes(extname(entry)) && !entry.endsWith('.d.ts')) {
+          try {
+            const content = readFileSync(fullPath, 'utf-8');
+            const relativePath = relative(projectPath, fullPath);
+            let match;
             
-            // Extract params
-            const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+            // Express/Koa/Hono 기본 패턴: router.get('/path'), app.post('/path')
+            const expressRegex = /(?:router|app|server|api|route|routes)\.(get|post|put|patch|delete|options|head|all)\s*\(\s*['"`]([^'"`]+)['"`]/gi;
+            while ((match = expressRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase();
+              if (method === 'ALL') continue; // all은 무시
+              const path = match[2];
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              const afterMatch = content.substring(match.index, match.index + 150);
+              const isAsync = afterMatch.includes('async');
+              
+              // 핸들러 함수 이름 추출 시도
+              const handlerMatch = afterMatch.match(/,\s*(\w+)/) || afterMatch.match(/=>\s*(\w+)\(/) || afterMatch.match(/async\s+(\w+)/);
+              const handler = handlerMatch ? handlerMatch[1] : `${method.toLowerCase()}Handler`;
+              
+              endpoints.push({
+                id: `${method}-${path}-${relativePath}-${lineNumber}`,
+                method: method as ApiEndpoint['method'],
+                path, filePath: relativePath, fileName: entry,
+                handler, params, isAsync, lineNumber, framework: 'express',
+              });
+            }
             
-            // Find line number
-            const lines = content.substring(0, match.index).split('\n');
-            const lineNumber = lines.length;
+            // Fastify 패턴: fastify.get('/path'), f.post('/path')
+            const fastifyRegex = /(?:fastify|f|server|app)\.(get|post|put|patch|delete|options|head)\s*\(\s*['"`]([^'"`]+)['"`]/gi;
+            while ((match = fastifyRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[2];
+              if (endpoints.some(e => e.path === path && e.method === method && e.filePath === relativePath)) continue;
+              
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              const isAsync = content.substring(match.index, match.index + 100).includes('async');
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: method.toLowerCase(), params, isAsync, lineNumber, framework: 'fastify',
+              });
+            }
             
-            // Check for async
-            const afterMatch = content.substring(match.index, match.index + 100);
-            const isAsync = afterMatch.includes('async');
+            // Hono 패턴: app.get('/path'), c.post('/path')
+            const honoRegex = /(?:app|c|hono)\.(get|post|put|patch|delete|options|head)\s*\(\s*['"`]([^'"`]+)['"`]/gi;
+            while ((match = honoRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[2];
+              if (endpoints.some(e => e.path === path && e.method === method && e.filePath === relativePath)) continue;
+              
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              const isAsync = content.substring(match.index, match.index + 100).includes('async');
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: method.toLowerCase(), params, isAsync, lineNumber, framework: 'hono',
+              });
+            }
             
-            endpoints.push({
-              id: `${method}-${path}-${lineNumber}`,
-              method,
-              path,
-              filePath: relativePath,
-              fileName: entry,
-              handler: `${method} ${path}`,
-              params,
-              isAsync,
-              lineNumber,
-              framework: 'express',
-            });
+            // NestJS 패턴: @Get('/path'), @Post(), @Controller('/api')
+            const nestControllerMatch = content.match(/@Controller\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/);
+            const nestPrefix = nestControllerMatch ? nestControllerMatch[1] : '';
+            
+            const nestMethodRegex = /@(Get|Post|Put|Patch|Delete|Options|Head)\s*\(\s*(?:['"`]([^'"`]*)['"`])?\s*\)/gi;
+            while ((match = nestMethodRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              let path = match[2] || '';
+              const fullPath2 = (nestPrefix + (path.startsWith('/') ? path : '/' + path)).replace(/\/\//g, '/') || '/';
+              
+              const params = (fullPath2.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              // 메서드 이름 찾기
+              const afterDecorator = content.substring(match.index);
+              const methodNameMatch = afterDecorator.match(/(?:async\s+)?(\w+)\s*\(/);
+              const handler = methodNameMatch ? methodNameMatch[1] : 'handler';
+              const isAsync = afterDecorator.substring(0, 80).includes('async');
+              
+              endpoints.push({
+                id: `${method}-${fullPath2}-${lineNumber}`,
+                method, path: fullPath2, filePath: relativePath, fileName: entry,
+                handler, params, isAsync, lineNumber, framework: 'nestjs',
+              });
+            }
+            
+            // tRPC 패턴: .query(), .mutation()
+            const trpcRegex = /\.(\w+)\s*:\s*(?:publicProcedure|protectedProcedure|procedure)\s*\.(query|mutation)\s*\(/gi;
+            while ((match = trpcRegex.exec(content)) !== null) {
+              const handler = match[1];
+              const type = match[2];
+              const method = type === 'mutation' ? 'POST' : 'GET';
+              const path = `/trpc/${handler}`;
+              
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method: method as ApiEndpoint['method'],
+                path, filePath: relativePath, fileName: entry,
+                handler, params: [], isAsync: true, lineNumber, framework: 'trpc',
+              });
+            }
+            
+            // 라우터 export 패턴: export default router
+            // Route 배열 패턴: { method: 'GET', path: '/api' }
+            const routeArrayRegex = /\{\s*(?:method|httpMethod)\s*:\s*['"`](GET|POST|PUT|PATCH|DELETE)['"`]\s*,\s*(?:path|url|route)\s*:\s*['"`]([^'"`]+)['"`]/gi;
+            while ((match = routeArrayRegex.exec(content)) !== null) {
+              const method = match[1].toUpperCase() as ApiEndpoint['method'];
+              const path = match[2];
+              
+              if (endpoints.some(e => e.path === path && e.method === method && e.filePath === relativePath)) continue;
+              
+              const params = (path.match(/:(\w+)/g) || []).map(p => p.slice(1));
+              const lines = content.substring(0, match.index).split('\n');
+              const lineNumber = lines.length;
+              
+              endpoints.push({
+                id: `${method}-${path}-${lineNumber}`,
+                method, path, filePath: relativePath, fileName: entry,
+                handler: 'routeHandler', params, isAsync: true, lineNumber, framework: 'express',
+              });
+            }
+            
+          } catch (e) {
+            // 파일 읽기 실패 - 무시
           }
         }
       }
     } catch (e) {}
   }
   
+  // 여러 가능한 경로 스캔
   scanDir(join(projectPath, 'src'));
   scanDir(join(projectPath, 'routes'));
   scanDir(join(projectPath, 'api'));
+  scanDir(join(projectPath, 'server'));
+  scanDir(join(projectPath, 'lib'));
+  scanDir(join(projectPath, 'app'));
+  scanDir(projectPath);
   
-  return endpoints;
+  // 중복 제거
+  const seen = new Set<string>();
+  return endpoints.filter(ep => {
+    const key = `${ep.method}-${ep.path}-${ep.filePath}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // Python 파싱 (FastAPI, Flask, Django)
@@ -519,7 +641,9 @@ export async function GET(
       case 'express':
       case 'fastify':
       case 'koa':
-        endpoints = parseExpressRoutes(project.path);
+      case 'nestjs':
+      case 'hono':
+        endpoints = parseTypeScriptRoutes(project.path);
         break;
       case 'fastapi':
       case 'flask':
@@ -533,7 +657,7 @@ export async function GET(
         // Try all parsers
         endpoints = [
           ...parseNextJsAppRouter(project.path),
-          ...parseExpressRoutes(project.path),
+          ...parseTypeScriptRoutes(project.path),
           ...parsePythonRoutes(project.path),
           ...parseSpringRoutes(project.path),
         ];

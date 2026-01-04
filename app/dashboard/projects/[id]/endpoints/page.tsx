@@ -29,7 +29,14 @@ import {
   PieChart,
   Play,
   X,
-  Keyboard
+  Keyboard,
+  Star,
+  StarOff,
+  Lock,
+  Unlock,
+  Clock,
+  History,
+  Zap
 } from 'lucide-react';
 
 interface ApiEndpoint {
@@ -85,6 +92,28 @@ export default function ApiEndpointsPage() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  
+  // 즐겨찾기 (localStorage)
+  const [favorites, setFavorites] = useState<Set<string>>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`api-favorites-${projectId}`);
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    }
+    return new Set();
+  });
+  
+  // 검색 기록
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`api-search-history-${projectId}`);
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+  const [showSearchHistory, setShowSearchHistory] = useState(false);
+  
+  // 최근 본 엔드포인트
+  const [recentlyViewed, setRecentlyViewed] = useState<string[]>([]);
   
   // 데이터 로드
   useEffect(() => {
@@ -166,6 +195,49 @@ export default function ApiEndpointsPage() {
     // 코드 요소 페이지로 이동
     router.push(`/dashboard/projects/${projectId}/code-elements?file=${encodeURIComponent(ep.filePath)}&line=${ep.lineNumber}`);
   }, [projectId, router]);
+  
+  // 즐겨찾기 토글
+  const toggleFavorite = useCallback((id: string) => {
+    setFavorites(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      localStorage.setItem(`api-favorites-${projectId}`, JSON.stringify([...next]));
+      return next;
+    });
+  }, [projectId]);
+  
+  // 엔드포인트 선택 시 최근 본 목록에 추가
+  const selectEndpoint = useCallback((ep: ApiEndpoint) => {
+    setSelectedEndpoint(ep);
+    setRecentlyViewed(prev => {
+      const filtered = prev.filter(id => id !== ep.id);
+      return [ep.id, ...filtered].slice(0, 10);
+    });
+  }, []);
+  
+  // 검색 기록 추가
+  const addSearchHistory = useCallback((query: string) => {
+    if (!query.trim()) return;
+    setSearchHistory(prev => {
+      const updated = [query, ...prev.filter(q => q !== query)].slice(0, 10);
+      localStorage.setItem(`api-search-history-${projectId}`, JSON.stringify(updated));
+      return updated;
+    });
+    setShowSearchHistory(false);
+  }, [projectId]);
+  
+  // 검색 실행
+  const executeSearch = useCallback((query: string) => {
+    setSearchQuery(query);
+    if (query.trim()) {
+      addSearchHistory(query);
+    }
+    setShowSearchHistory(false);
+  }, [addSearchHistory]);
   
   // curl 명령어 생성
   const generateCurl = useCallback((ep: ApiEndpoint) => {
