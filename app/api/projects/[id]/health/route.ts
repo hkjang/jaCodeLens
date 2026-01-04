@@ -146,7 +146,11 @@ export async function GET(
         quality: { 
           score: qualityScore, 
           issues: categoryStats.quality.total,
-          maintainabilityCost: Math.round(categoryStats.quality.total * 1.5) // Simplified cost estimate
+          // 유지비용 계산 기준 (단위: 만원)
+          // - 이슈당 평균 수정 시간: CRITICAL 4시간, HIGH 2시간, MEDIUM 1시간, LOW 0.5시간
+          // - 시니어 개발자 시급: 10만원 (약 $75)
+          // - 간소화 계산: 이슈 수 × 평균 1.5시간 × 10만원 = 이슈 × 15만원
+          maintainabilityCost: Math.round(categoryStats.quality.total * 15) // 단위: 만원 (KRW)
         },
         structure: { 
           score: structureScore, 

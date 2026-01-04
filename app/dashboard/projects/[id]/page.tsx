@@ -62,6 +62,7 @@ interface CategoryConfig {
   };
   metric: string;
   metricLabel: string;
+  metricTooltip: string;  // 지표 계산 기준 설명
 }
 
 export default function ProjectDetailPage() {
@@ -186,7 +187,8 @@ export default function ProjectDetailPage() {
       recommendation: '보안 이슈는 즉시 조치가 필요합니다. Critical, High 순으로 우선 처리하세요.',
       data: health.categoryScores.security, 
       metric: `${health.categoryScores.security.critical}`,
-      metricLabel: 'Critical 이슈'
+      metricLabel: 'Critical 이슈',
+      metricTooltip: 'CRITICAL 심각도의 보안 취약점 수. 즉시 조치가 필요한 이슈입니다.'
     },
     { 
       key: 'quality', 
@@ -201,8 +203,12 @@ export default function ProjectDetailPage() {
       description: '코드 품질 및 유지보수성 분석',
       recommendation: '품질 개선은 장기적인 유지보수 비용을 절감합니다.',
       data: health.categoryScores.quality, 
-      metric: `$${health.categoryScores.quality.maintainabilityCost}K`,
-      metricLabel: '예상 유지비용'
+      // 유지비용 표시: 1000만원 이상이면 억원으로 표시
+      metric: health.categoryScores.quality.maintainabilityCost >= 1000 
+        ? `약 ${(health.categoryScores.quality.maintainabilityCost / 10000).toFixed(1)}억원`
+        : `${health.categoryScores.quality.maintainabilityCost.toLocaleString()}만원`,
+      metricLabel: '예상 유지비용',
+      metricTooltip: '계산 기준: 이슈당 평균 수정 시간 1.5시간 × 시니어 개발자 시급 10만원. 품질 이슈를 해결하는데 드는 예상 인건비입니다.'
     },
     { 
       key: 'structure', 
@@ -218,7 +224,8 @@ export default function ProjectDetailPage() {
       recommendation: '결합도를 낮추면 테스트와 유지보수가 쉬워집니다.',
       data: health.categoryScores.structure, 
       metric: `${health.categoryScores.structure.coupling}%`,
-      metricLabel: '결합도'
+      metricLabel: '결합도',
+      metricTooltip: '모듈 간 결합 정도. 100%에서 구조 점수를 뺀 값. 낮을수록 모듈 독립성이 높고 유지보수가 용이합니다.'
     },
     { 
       key: 'operations', 
@@ -234,7 +241,8 @@ export default function ProjectDetailPage() {
       recommendation: '장애 위험도가 높은 코드를 우선 개선하세요.',
       data: health.categoryScores.operations, 
       metric: `${health.categoryScores.operations.failureRisk}%`,
-      metricLabel: '장애 위험도'
+      metricLabel: '장애 위험도',
+      metricTooltip: '운영 관련 이슈로 인한 장애 발생 가능성. 100%에서 운영 점수를 뺀 값. 로깅, 에러 핸들링, 설정 관리 등을 평가합니다.'
     },
     { 
       key: 'test', 
@@ -250,7 +258,8 @@ export default function ProjectDetailPage() {
       recommendation: '핵심 비즈니스 로직부터 테스트 커버리지를 높이세요.',
       data: health.categoryScores.test, 
       metric: `${health.categoryScores.test.coverage}%`,
-      metricLabel: '테스트 커버리지'
+      metricLabel: '테스트 커버리지',
+      metricTooltip: '테스트 코드로 검증되는 코드 비율 추정치. 테스트 점수와 동일하며, 테스트 파일 존재 여부 및 품질을 기반으로 계산됩니다.'
     }
   ];
 
@@ -494,7 +503,10 @@ export default function ProjectDetailPage() {
               </div>
               <p className="font-semibold text-gray-900 dark:text-white mb-1">{cat.label}</p>
               <p className="text-xs text-gray-500">{cat.data.issues.toLocaleString()}개 이슈</p>
-              <p className="text-xs text-gray-400 mt-1">{cat.metric} {cat.metricLabel}</p>
+              <p className="text-xs text-gray-400 mt-1 flex items-center gap-1 cursor-help" title={cat.metricTooltip}>
+                {cat.metric} {cat.metricLabel}
+                <Info className="w-3 h-3 opacity-50 hover:opacity-100" />
+              </p>
               
               {/* Issue proportion indicator */}
               {totalIssues > 0 && (
@@ -602,6 +614,14 @@ export default function ProjectDetailPage() {
               <div className="text-center py-4">
                 <p className="text-5xl font-bold mb-2">{activeCategoryConfig.metric}</p>
                 <p className="text-white/70">{activeCategoryConfig.metricLabel}</p>
+              </div>
+              {/* 계산 기준 설명 */}
+              <div className="mt-2 p-3 bg-white/5 rounded-lg border border-white/10">
+                <div className="flex items-center gap-2 mb-1">
+                  <Info className="w-4 h-4 text-blue-300" />
+                  <span className="text-xs font-medium text-blue-200">계산 기준</span>
+                </div>
+                <p className="text-xs text-white/80 leading-relaxed">{activeCategoryConfig.metricTooltip}</p>
               </div>
               <div className="mt-4 p-3 bg-white/10 rounded-lg">
                 <div className="flex items-center gap-2 mb-1">
