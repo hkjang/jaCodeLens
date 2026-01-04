@@ -1231,11 +1231,26 @@ function parseTypeScriptRoutes(projectPath: string): ApiEndpoint[] {
               const handlerMatch = afterMatch.match(/,\s*(\w+)/) || afterMatch.match(/=>\s*(\w+)\(/) || afterMatch.match(/async\s+(\w+)/);
               const handler = handlerMatch ? handlerMatch[1] : `${method.toLowerCase()}Handler`;
               
+              // 파라미터 추출
+              const extracted = extractTsParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              
+              // 경로 파라미터 추가
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${relativePath}-${lineNumber}`,
                 method: method as ApiEndpoint['method'],
                 path, filePath: relativePath, fileName: entry,
                 handler, params, isAsync, lineNumber, framework: 'express',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
@@ -1251,10 +1266,23 @@ function parseTypeScriptRoutes(projectPath: string): ApiEndpoint[] {
               const lineNumber = lines.length;
               const isAsync = content.substring(match.index, match.index + 100).includes('async');
               
+              // 파라미터 추출
+              const extracted = extractTsParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method, path, filePath: relativePath, fileName: entry,
                 handler: method.toLowerCase(), params, isAsync, lineNumber, framework: 'fastify',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
@@ -1270,10 +1298,23 @@ function parseTypeScriptRoutes(projectPath: string): ApiEndpoint[] {
               const lineNumber = lines.length;
               const isAsync = content.substring(match.index, match.index + 100).includes('async');
               
+              // 파라미터 추출
+              const extracted = extractTsParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method, path, filePath: relativePath, fileName: entry,
                 handler: method.toLowerCase(), params, isAsync, lineNumber, framework: 'hono',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
@@ -1297,10 +1338,25 @@ function parseTypeScriptRoutes(projectPath: string): ApiEndpoint[] {
               const handler = methodNameMatch ? methodNameMatch[1] : 'handler';
               const isAsync = afterDecorator.substring(0, 80).includes('async');
               
+              // 파라미터 추출
+              const extracted = extractTsParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              const middleware = extractMiddleware(content, match.index);
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${fullPath2}-${lineNumber}`,
                 method, path: fullPath2, filePath: relativePath, fileName: entry,
                 handler, params, isAsync, lineNumber, framework: 'nestjs',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
+                middleware,
               });
             }
             
@@ -1315,11 +1371,17 @@ function parseTypeScriptRoutes(projectPath: string): ApiEndpoint[] {
               const lines = content.substring(0, match.index).split('\n');
               const lineNumber = lines.length;
               
+              // 파라미터 추출
+              const extracted = extractTsParams(content, match.index);
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method: method as ApiEndpoint['method'],
                 path, filePath: relativePath, fileName: entry,
                 handler, params: [], isAsync: true, lineNumber, framework: 'trpc',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: [{ statusCode: 200, contentType: 'application/json' }],
               });
             }
             
@@ -1408,10 +1470,23 @@ function parsePythonRoutes(projectPath: string): ApiEndpoint[] {
               const handler = funcMatch ? funcMatch[1] : 'unknown';
               const isAsync = afterDecorator.substring(0, 80).includes('async');
               
+              // 파라미터 추출
+              const extracted = extractPythonParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method, path, filePath: relativePath, fileName: entry,
                 handler, params, isAsync, lineNumber, framework: 'fastapi',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
@@ -1431,10 +1506,23 @@ function parsePythonRoutes(projectPath: string): ApiEndpoint[] {
               const handler = funcMatch ? funcMatch[1] : 'unknown';
               const isAsync = afterDecorator.substring(0, 80).includes('async');
               
+              // 파라미터 추출
+              const extracted = extractPythonParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method, path, filePath: relativePath, fileName: entry,
                 handler, params, isAsync, lineNumber, framework: 'fastapi',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
@@ -1454,11 +1542,24 @@ function parsePythonRoutes(projectPath: string): ApiEndpoint[] {
                 const funcMatch = afterDecorator.match(/def\s+(\w+)/);
                 const handler = funcMatch ? funcMatch[1] : 'unknown';
                 
+                // 파라미터 추출
+                const extracted = extractPythonParams(content, match.index);
+                const auth = detectAuthType(content.substring(match.index, match.index + 500));
+                for (const p of params) {
+                  if (!extracted.params.some(ep => ep.name === p)) {
+                    extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                  }
+                }
+                
                 endpoints.push({
                   id: `${method}-${path}-${lineNumber}`,
                   method: method as ApiEndpoint['method'],
                   path, filePath: relativePath, fileName: entry,
                   handler, params, isAsync: false, lineNumber, framework: 'flask',
+                  parameters: extracted.params,
+                  requestBody: extracted.body,
+                  responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                  auth,
                 });
               }
             }
@@ -1472,10 +1573,21 @@ function parsePythonRoutes(projectPath: string): ApiEndpoint[] {
               const lines = content.substring(0, match.index).split('\n');
               const lineNumber = lines.length;
               
+              // 파라미터 추출
+              const extracted = extractPythonParams(content, match.index);
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `GET-${path}-${lineNumber}`,
                 method: 'GET', path, filePath: relativePath, fileName: entry,
                 handler, params, isAsync: false, lineNumber, framework: 'django',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: [{ statusCode: 200, contentType: 'application/json' }],
               });
             }
             
@@ -1577,6 +1689,18 @@ function parseSpringRoutes(projectPath: string): ApiEndpoint[] {
               const methodMatch = afterAnnotation.match(/(?:public|private|protected)?\s*(?:fun|\w+(?:<[^>]+>)?)\s+(\w+)\s*\(/);
               const handler = methodMatch ? methodMatch[1] : 'unknown';
               
+              // 파라미터 추출
+              const extracted = extractJavaParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              const validation = extractValidation(content, match.index);
+              const rateLimit = extractRateLimit(content.substring(match.index, match.index + 300));
+              const cache = extractCache(content.substring(match.index, match.index + 300));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'String', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${fullPath2}-${lineNumber}`,
                 method: method as ApiEndpoint['method'],
@@ -1585,11 +1709,18 @@ function parseSpringRoutes(projectPath: string): ApiEndpoint[] {
                 fileName: entry,
                 handler,
                 params,
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
                 isAsync: content.substring(match.index, match.index + 300).includes('CompletableFuture') || 
                          content.substring(match.index, match.index + 300).includes('Mono<') ||
                          content.substring(match.index, match.index + 300).includes('suspend'),
                 lineNumber,
                 framework: 'spring',
+                auth,
+                validation,
+                rateLimit,
+                cache,
               });
             }
             
@@ -1610,6 +1741,15 @@ function parseSpringRoutes(projectPath: string): ApiEndpoint[] {
               const methodMatch = afterAnnotation.match(/public\s+\w+\s+(\w+)\s*\(/);
               const handler = methodMatch ? methodMatch[1] : 'unknown';
               
+              // 파라미터 추출 (레거시 Java)
+              const extracted = extractLegacyJavaParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'String', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${fullPath2}-${lineNumber}`,
                 method,
@@ -1618,9 +1758,13 @@ function parseSpringRoutes(projectPath: string): ApiEndpoint[] {
                 fileName: entry,
                 handler,
                 params,
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
                 isAsync: false,
                 lineNumber,
                 framework: 'jax-rs',
+                auth,
               });
             }
             
@@ -1636,12 +1780,18 @@ function parseSpringRoutes(projectPath: string): ApiEndpoint[] {
               const methodMatch = afterAnnotation.match(/public\s+\w+\s+(\w+)\s*\(/);
               const handler = methodMatch ? methodMatch[1] : 'execute';
               
+              // 파라미터 추출
+              const extracted = extractLegacyJavaParams(content, match.index);
+              
               endpoints.push({
                 id: `POST-${path}-${lineNumber}`,
                 method: 'POST',
                 path, filePath: relativePath, fileName: entry,
                 handler, params: [], isAsync: false, lineNumber,
                 framework: 'struts',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200 }],
               });
             }
             
@@ -1900,11 +2050,24 @@ function parseGoRoutes(projectPath: string): ApiEndpoint[] {
               const lines = content.substring(0, match.index).split('\n');
               const lineNumber = lines.length;
               
+              // Go 파라미터 추출
+              const extracted = extractGoParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method, path, filePath: relativePath, fileName: entry,
                 handler: 'handler', params, isAsync: false, lineNumber,
                 framework: 'gin',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
@@ -1921,11 +2084,24 @@ function parseGoRoutes(projectPath: string): ApiEndpoint[] {
               const lines = content.substring(0, match.index).split('\n');
               const lineNumber = lines.length;
               
+              // Go 파라미터 추출
+              const extracted = extractGoParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method, path, filePath: relativePath, fileName: entry,
                 handler: 'handler', params, isAsync: false, lineNumber,
                 framework: 'echo',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
@@ -1942,11 +2118,24 @@ function parseGoRoutes(projectPath: string): ApiEndpoint[] {
               const lines = content.substring(0, match.index).split('\n');
               const lineNumber = lines.length;
               
+              // Go 파라미터 추출
+              const extracted = extractGoParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method, path, filePath: relativePath, fileName: entry,
                 handler: 'handler', params, isAsync: false, lineNumber,
                 framework: 'fiber',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
@@ -2011,11 +2200,24 @@ function parseRubyRoutes(projectPath: string): ApiEndpoint[] {
               const lines = content.substring(0, match.index).split('\n');
               const lineNumber = lines.length;
               
+              // Ruby 파라미터 추출
+              const extracted = extractRubyParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method, path, filePath: relativePath, fileName: entry,
                 handler: 'action', params, isAsync: false, lineNumber,
                 framework: 'rails',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
@@ -2032,11 +2234,24 @@ function parseRubyRoutes(projectPath: string): ApiEndpoint[] {
               const lines = content.substring(0, match.index).split('\n');
               const lineNumber = lines.length;
               
+              // Ruby 파라미터 추출
+              const extracted = extractRubyParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method, path, filePath: relativePath, fileName: entry,
                 handler: 'block', params, isAsync: false, lineNumber,
                 framework: 'sinatra',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
@@ -2088,11 +2303,24 @@ function parsePhpRoutes(projectPath: string): ApiEndpoint[] {
               const lines = content.substring(0, match.index).split('\n');
               const lineNumber = lines.length;
               
+              // PHP 파라미터 추출
+              const extracted = extractPhpParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method, path, filePath: relativePath, fileName: entry,
                 handler: 'controller', params, isAsync: false, lineNumber,
                 framework: 'laravel',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
@@ -2194,11 +2422,24 @@ function parseRustRoutes(projectPath: string): ApiEndpoint[] {
               const fnMatch = afterAttr.match(/async\s+fn\s+(\w+)|fn\s+(\w+)/);
               const handler = fnMatch ? (fnMatch[1] || fnMatch[2]) : 'handler';
               
+              // Rust 파라미터 추출
+              const extracted = extractRustParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'String', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method, path, filePath: relativePath, fileName: entry,
                 handler, params, isAsync: afterAttr.includes('async fn'), lineNumber,
                 framework: 'actix',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
@@ -2216,11 +2457,24 @@ function parseRustRoutes(projectPath: string): ApiEndpoint[] {
               const fnMatch = afterAttr.match(/fn\s+(\w+)/);
               const handler = fnMatch ? fnMatch[1] : 'handler';
               
+              // Rust 파라미터 추출
+              const extracted = extractRustParams(content, match.index);
+              const auth = detectAuthType(content.substring(match.index, match.index + 500));
+              for (const p of params) {
+                if (!extracted.params.some(ep => ep.name === p)) {
+                  extracted.params.push({ name: p, type: 'String', required: true, in: 'path' });
+                }
+              }
+              
               endpoints.push({
                 id: `${method}-${path}-${lineNumber}`,
                 method, path, filePath: relativePath, fileName: entry,
                 handler, params, isAsync: false, lineNumber,
                 framework: 'rocket',
+                parameters: extracted.params,
+                requestBody: extracted.body,
+                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+                auth,
               });
             }
             
