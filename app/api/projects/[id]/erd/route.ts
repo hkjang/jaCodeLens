@@ -36,7 +36,7 @@ interface ErdData {
   language?: string;
 }
 
-type SchemaType = 'prisma' | 'django' | 'sqlalchemy' | 'typeorm' | 'sequelize' | 'laravel' | 'rails' | 'spring' | 'dotnet' | 'go' | 'sql' | 'unknown';
+type SchemaType = 'prisma' | 'django' | 'sqlalchemy' | 'typeorm' | 'sequelize' | 'laravel' | 'rails' | 'spring' | 'dotnet' | 'go' | 'sql' | 'sqlite' | 'unknown';
 
 // 프로젝트 언어 감지
 function detectProjectLanguage(projectPath: string): { language: string; frameworks: string[] } {
@@ -422,6 +422,103 @@ function parseSQLSchema(content: string): Omit<ErdData, 'schemaPath' | 'schemaTy
   return { models, relations };
 }
 
+// SQLite 파일 파싱 (바이너리 파일 직접 읽기)
+async function parseSQLiteFile(filePath: string): Promise<Omit<ErdData, 'schemaPath' | 'schemaType' | 'language'>> {
+  const models: ErdModel[] = [];
+  const relations: ErdRelation[] = [];
+  
+  try {
+    // @libsql/client 동적 import
+    const { createClient } = await import('@libsql/client');
+    
+    const client = createClient({
+      url: `file:${filePath}`,
+    });
+    
+    // sqlite_master에서 테이블 목록 가져오기
+    const tables = await client.execute(
+      "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_prisma_%'"
+    );
+    
+    console.log(`[ERD SQLite] Found ${tables.rows.length} tables`);
+    
+    for (const row of tables.rows) {
+      const tableName = row.name as string;
+      const createSql = row.sql as string || '';
+      
+      const fields: ErdField[] = [];
+      
+      // PRAGMA table_info 사용하여 컬럼 정보 정확하게 가져오기
+      try {
+        const columnsResult = await client.execute(`PRAGMA table_info("${tableName}")`);
+        
+        for (const col of columnsResult.rows) {
+          const colName = col.name as string;
+          const colType = (col.type as string) || 'TEXT';
+          const notNull = col.notnull as number;
+          const pk = col.pk as number;
+          const dfltValue = col.dflt_value;
+          
+          const attributes: string[] = [];
+          if (pk > 0) attributes.push('PRIMARY KEY');
+          if (dfltValue !== null) attributes.push('DEFAULT');
+          
+          fields.push({
+            name: colName,
+            type: colType.toUpperCase(),
+            isPrimaryKey: pk > 0,
+            isOptional: notNull === 0 && pk === 0,
+            isArray: false,
+            isRelation: false,
+            attributes,
+          });
+        }
+      } catch (pragmaError) {
+        console.error(`[ERD SQLite] PRAGMA error for ${tableName}:`, pragmaError);
+      }
+      
+      // PRAGMA foreign_key_list 사용하여 외래키 정보 가져오기
+      try {
+        const fkeysResult = await client.execute(`PRAGMA foreign_key_list("${tableName}")`);
+        
+        for (const fk of fkeysResult.rows) {
+          const fromField = fk.from as string;
+          const toTable = fk.table as string;
+          const toField = fk.to as string;
+          
+          relations.push({
+            from: tableName,
+            to: toTable,
+            fromField,
+            toField,
+            type: 'n-1',
+          });
+          
+          // 해당 필드를 관계로 표시
+          const field = fields.find(f => f.name === fromField);
+          if (field) field.isRelation = true;
+        }
+      } catch (fkError) {
+        // FK가 없을 수 있음
+      }
+      
+      models.push({
+        name: tableName,
+        fields,
+        category: categorizeModel(tableName),
+      });
+    }
+    
+    console.log(`[ERD SQLite] Parsed ${models.length} models with ${relations.length} relations`);
+    
+    client.close();
+  } catch (error) {
+    console.error('Failed to parse SQLite file:', error);
+  }
+  
+  return { models, relations };
+}
+
 // Laravel Eloquent 파싱 (PHP)
 function parseLaravelModels(content: string): Omit<ErdData, 'schemaPath' | 'schemaType' | 'language'> {
   const models: ErdModel[] = [];
@@ -747,6 +844,44 @@ function findSchemaFiles(projectPath: string, frameworks: string[]): SchemaFile[
     schemaFiles.push(...sqlFiles);
   }
   
+  // SQLite 파일 검색 (폴백) - 프로젝트 루트 우선, 프로젝트명 매칭 파일 우선
+  if (schemaFiles.length === 0) {
+    const sqlitePatterns = ['*.db', '*.sqlite', '*.sqlite3'];
+    const sqliteFiles: SchemaFile[] = [];
+    
+    // 1. 프로젝트 루트에서만 먼저 검색
+    for (const pattern of sqlitePatterns) {
+      const rootFiles = searchForSchemaInDir(projectPath, pattern, 'sqlite', 0); // depth 0 = 루트만
+      sqliteFiles.push(...rootFiles);
+    }
+    
+    // 2. 프로젝트명과 일치하는 파일 우선 (예: jainsight -> jainsight.db)
+    const projectName = basename(projectPath).toLowerCase();
+    sqliteFiles.sort((a, b) => {
+      const aName = basename(a.path).toLowerCase();
+      const bName = basename(b.path).toLowerCase();
+      const aMatch = aName.includes(projectName) ? 1 : 0;
+      const bMatch = bName.includes(projectName) ? 1 : 0;
+      return bMatch - aMatch; // 매칭되는 파일 우선
+    });
+    
+    // 3. 루트에서 못 찾았으면 하위 검색 (prisma, data 폴더 등)
+    if (sqliteFiles.length === 0) {
+      const commonDbDirs = ['prisma', 'data', 'db', 'database'];
+      for (const dbDir of commonDbDirs) {
+        const dbDirPath = join(projectPath, dbDir);
+        if (existsSync(dbDirPath)) {
+          for (const pattern of sqlitePatterns) {
+            const dirFiles = searchForSchemaInDir(dbDirPath, pattern, 'sqlite', 1);
+            sqliteFiles.push(...dirFiles);
+          }
+        }
+      }
+    }
+    
+    schemaFiles.push(...sqliteFiles);
+  }
+  
   return schemaFiles;
 }
 
@@ -760,7 +895,12 @@ function searchForSchema(projectPath: string, pattern: string, type: SchemaType)
       const entries = readdirSync(dir);
       
       for (const entry of entries) {
-        if (['node_modules', '.git', 'dist', 'build', '__pycache__', '.next', 'vendor'].includes(entry)) continue;
+        // 캐시, IDE, 빌드 폴더 제외
+        if ([
+          'node_modules', '.git', 'dist', 'build', '__pycache__', '.next', 'vendor',
+          '.nx', '.turbo', '.cache', '.vscode', '.idea', 'coverage', 'tmp', 'temp',
+          '.angular', '.svelte-kit', 'out', 'target', '.gradle', '.mvn'
+        ].includes(entry)) continue;
         
         const fullPath = join(dir, entry);
         
@@ -795,6 +935,56 @@ function searchForSchema(projectPath: string, pattern: string, type: SchemaType)
   
   search(projectPath, 0);
   return results.slice(0, 5); // 최대 5개
+}
+
+// depth 제한 지원 버전 - SQLite 검색용
+function searchForSchemaInDir(dir: string, pattern: string, type: SchemaType, maxDepth: number): SchemaFile[] {
+  const results: SchemaFile[] = [];
+  
+  function search(currentDir: string, depth: number) {
+    if (depth > maxDepth) return;
+    
+    try {
+      const entries = readdirSync(currentDir);
+      
+      for (const entry of entries) {
+        // 캐시, IDE, 빌드 폴더 제외
+        if ([
+          'node_modules', '.git', 'dist', 'build', '__pycache__', '.next', 'vendor',
+          '.nx', '.turbo', '.cache', '.vscode', '.idea', 'coverage', 'tmp', 'temp',
+          '.angular', '.svelte-kit', 'out', 'target', '.gradle', '.mvn'
+        ].includes(entry)) continue;
+        
+        const fullPath = join(currentDir, entry);
+        
+        try {
+          const stat = statSync(fullPath);
+          
+          if (stat.isFile()) {
+            const ext = extname(entry);
+            
+            // 패턴 매칭
+            if (pattern.includes('*')) {
+              const patternExt = extname(pattern);
+              
+              if (patternExt === ext || patternExt === '.*') {
+                results.push({ path: fullPath, type });
+              }
+            } else if (pattern === entry) {
+              results.push({ path: fullPath, type });
+            }
+          } else if (stat.isDirectory() && depth < maxDepth) {
+            search(fullPath, depth + 1);
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+    } catch (e) {}
+  }
+  
+  search(dir, 0);
+  return results;
 }
 
 // ===================== MAIN HANDLER =====================
@@ -876,6 +1066,10 @@ export async function GET(
       case 'sql':
         erdData = parseSQLSchema(content);
         break;
+      case 'sqlite':
+        // SQLite 파일은 별도 파싱 필요 (바이너리 파일이므로 sqlite_master 쿼리 사용)
+        erdData = await parseSQLiteFile(schemaFile.path);
+        break;
       default:
         // 파일 확장자 기반 폴백
         const ext = schemaFile.path.toLowerCase();
@@ -902,6 +1096,37 @@ export async function GET(
           if (erdData.models.length === 0) erdData = parseDjangoModels(content);
           if (erdData.models.length === 0) erdData = parseSQLSchema(content);
         }
+    }
+    
+    // 파싱 결과가 비어있으면 SQLite 파일 폴백 시도
+    if (erdData.models.length === 0 && schemaFile.type !== 'sqlite') {
+      console.log('[ERD] Schema parsing returned no models, trying SQLite fallback...');
+      
+      // SQLite 파일 검색
+      const sqlitePatterns = ['*.db', '*.sqlite', '*.sqlite3'];
+      let sqliteFiles: {path: string; type: SchemaType}[] = [];
+      
+      for (const pattern of sqlitePatterns) {
+        sqliteFiles = searchForSchema(project.path, pattern, 'sqlite');
+        if (sqliteFiles.length > 0) break;
+      }
+      
+      if (sqliteFiles.length > 0) {
+        console.log(`[ERD] Found SQLite file: ${sqliteFiles[0].path}`);
+        const sqliteData = await parseSQLiteFile(sqliteFiles[0].path);
+        if (sqliteData.models.length > 0) {
+          return NextResponse.json({
+            ...sqliteData,
+            schemaPath: sqliteFiles[0].path.replace(project.path, ''),
+            schemaType: 'sqlite',
+            language,
+            frameworks,
+            projectName: project.name,
+            projectPath: project.path,
+            availableSchemas: [...schemaFiles, ...sqliteFiles].map(s => ({ path: s.path.replace(project.path, ''), type: s.type }))
+          });
+        }
+      }
     }
     
     return NextResponse.json({
