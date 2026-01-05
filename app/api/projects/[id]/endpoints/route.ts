@@ -1198,6 +1198,12 @@ function enrichEndpointWithAnalysis(
   endpoint.consistency = analyzeConsistency(content, startIndex, endpoint);
   endpoint.healthScore = calculateHealthScore(endpoint);
   
+  // v3 고급 분석 정보 추가
+  endpoint.mockData = generateMockData(endpoint);
+  endpoint.sdkSnippets = generateSDKSnippets(endpoint);
+  endpoint.dependencies = analyzeDependencies(content, startIndex, endpoint);
+  endpoint.usageHints = generateUsageHints(endpoint);
+  
   return endpoint;
 }
 
@@ -3577,6 +3583,22 @@ export async function GET(
     // gRPC 엔드포인트 추가
     const grpcEndpoints = parseGrpcEndpoints(project.path);
     endpoints = [...endpoints, ...grpcEndpoints];
+    
+    // 엔드포인트에 고급 분석 정보 추가
+    for (let i = 0; i < endpoints.length; i++) {
+      const ep = endpoints[i];
+      try {
+        const content = readFileCached(ep.filePath);
+        const startIndex = content.indexOf(ep.handler) || ep.lineNumber || 0;
+        endpoints[i] = enrichEndpointWithAnalysis(ep, content, startIndex);
+      } catch (e) {
+        // 파일을 읽을 수 없는 경우 기본값으로 설정
+        endpoints[i].mockData = generateMockData(ep);
+        endpoints[i].sdkSnippets = generateSDKSnippets(ep);
+        endpoints[i].dependencies = { callsEndpoints: [], calledByEndpoints: [], externalApis: [] };
+        endpoints[i].usageHints = generateUsageHints(ep);
+      }
+    }
     
     // 그룹화
     const groups = groupEndpoints(endpoints);
