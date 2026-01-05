@@ -72,7 +72,7 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [animatedScore, setAnimatedScore] = useState(0);
+  const [animatedScore, setAnimatedScore] = useState<number | null>(null);
   const scoreAnimated = useRef(false);
   const detailPanelRef = useRef<HTMLDivElement>(null);
 
@@ -89,15 +89,20 @@ export default function ProjectDetailPage() {
     }
   }, [activeCategory]);
 
-  // Animate score on load
+  // Animate score on load - 실제 점수로 즉시 시작한 후 애니메이션
   useEffect(() => {
     if (health && !scoreAnimated.current) {
       scoreAnimated.current = true;
       const targetScore = health.overallScore;
-      const duration = 1500;
-      const steps = 60;
-      const stepValue = targetScore / steps;
-      let current = 0;
+      
+      // 첫 렌더링에서 즉시 목표 점수의 70%부터 시작 (0에서 시작하지 않음)
+      const startScore = Math.round(targetScore * 0.7);
+      setAnimatedScore(startScore);
+      
+      const duration = 800; // 더 짧은 애니메이션
+      const steps = 30;
+      const stepValue = (targetScore - startScore) / steps;
+      let current = startScore;
       
       const timer = setInterval(() => {
         current += stepValue;
@@ -373,20 +378,20 @@ export default function ProjectDetailPage() {
                 <circle cx="72" cy="72" r="60" stroke="rgba(255,255,255,0.1)" strokeWidth="10" fill="none" />
                 <circle 
                   cx="72" cy="72" r="60" 
-                  stroke={animatedScore >= 80 ? '#22C55E' : animatedScore >= 60 ? '#EAB308' : '#EF4444'}
+                  stroke={(animatedScore ?? 0) >= 80 ? '#22C55E' : (animatedScore ?? 0) >= 60 ? '#EAB308' : '#EF4444'}
                   strokeWidth="10" 
                   fill="none"
-                  strokeDasharray={`${(animatedScore / 100) * 377} 377`}
+                  strokeDasharray={`${((animatedScore ?? 0) / 100) * 377} 377`}
                   strokeLinecap="round"
                   className="transition-all duration-100"
                   style={{
-                    filter: animatedScore < 40 ? 'drop-shadow(0 0 8px rgba(239, 68, 68, 0.5))' : 'none'
+                    filter: (animatedScore ?? 0) < 40 ? 'drop-shadow(0 0 8px rgba(239, 68, 68, 0.5))' : 'none'
                   }}
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className={`text-5xl font-bold ${animatedScore < 40 ? 'animate-pulse' : ''}`}>
-                  {animatedScore}
+                <span className={`text-5xl font-bold ${(animatedScore ?? 0) < 40 ? 'animate-pulse' : ''}`}>
+                  {animatedScore !== null ? animatedScore : '-'}
                 </span>
                 <span className="text-sm text-gray-400 mt-1">종합 점수</span>
               </div>
