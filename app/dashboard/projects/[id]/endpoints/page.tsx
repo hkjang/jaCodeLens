@@ -1355,137 +1355,380 @@ export default function ApiEndpointsPage() {
                   </>
                 )}
                 
-                {/* 분석 탭 */}
+                {/* 분석 탭 - v7: Enhanced Analysis */}
                 {detailTab === 'analysis' && (
                   <>
-                    {/* 헬스 스코어 대시보드 */}
+                    {/* v7: Radar Chart for Health Scores */}
                     {selectedEndpoint.healthScore && (
                       <div className="bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-700/50 dark:to-gray-800/50 rounded-xl p-4">
                         <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3 flex items-center gap-1">
-                          <Heart className="w-3.5 h-3.5" /> API 헬스 스코어
+                          <Heart className="w-3.5 h-3.5" /> API 헬스 레이더
                         </h4>
-                        <div className="grid grid-cols-5 gap-2 text-center">
+                        
+                        {/* SVG Radar Chart */}
+                        <div className="flex items-center justify-center mb-4">
+                          <svg width="160" height="160" viewBox="0 0 160 160" className="transform -rotate-90">
+                            {/* Background circles */}
+                            {[1, 2, 3, 4].map(level => (
+                              <circle key={level} cx="80" cy="80" r={level * 18} fill="none" stroke="currentColor" strokeWidth="0.5" className="text-gray-300 dark:text-gray-600" />
+                            ))}
+                            
+                            {/* Radar polygon */}
+                            <polygon
+                              points={(() => {
+                                const scores = [
+                                  selectedEndpoint.healthScore?.overall ?? 0,
+                                  selectedEndpoint.healthScore?.security ?? 0,
+                                  selectedEndpoint.healthScore?.documentation ?? 0,
+                                  selectedEndpoint.healthScore?.performance ?? 0,
+                                  selectedEndpoint.healthScore?.naming ?? 0,
+                                ];
+                                return scores.map((score, i) => {
+                                  const angle = (i / 5) * Math.PI * 2;
+                                  const r = (score / 100) * 72;
+                                  const x = 80 + Math.cos(angle) * r;
+                                  const y = 80 + Math.sin(angle) * r;
+                                  return `${x},${y}`;
+                                }).join(' ');
+                              })()}
+                              fill="rgba(20, 184, 166, 0.3)"
+                              stroke="rgb(20, 184, 166)"
+                              strokeWidth="2"
+                            />
+                            
+                            {/* Data points */}
+                            {[
+                              selectedEndpoint.healthScore?.overall ?? 0,
+                              selectedEndpoint.healthScore?.security ?? 0,
+                              selectedEndpoint.healthScore?.documentation ?? 0,
+                              selectedEndpoint.healthScore?.performance ?? 0,
+                              selectedEndpoint.healthScore?.naming ?? 0,
+                            ].map((score, i) => {
+                              const angle = (i / 5) * Math.PI * 2;
+                              const r = (score / 100) * 72;
+                              const x = 80 + Math.cos(angle) * r;
+                              const y = 80 + Math.sin(angle) * r;
+                              return (
+                                <circle key={i} cx={x} cy={y} r="4" fill="rgb(20, 184, 166)" />
+                              );
+                            })}
+                          </svg>
+                        </div>
+                        
+                        {/* Score Labels with Progress Bars */}
+                        <div className="space-y-2">
                           {[
-                            { label: '전체', value: selectedEndpoint.healthScore.overall, key: 'overall' },
-                            { label: '보안', value: selectedEndpoint.healthScore.security, key: 'security' },
-                            { label: '문서', value: selectedEndpoint.healthScore.documentation, key: 'docs' },
-                            { label: '성능', value: selectedEndpoint.healthScore.performance, key: 'perf' },
-                            { label: '네이밍', value: selectedEndpoint.healthScore.naming, key: 'naming' },
+                            { label: '전체 헬스', value: selectedEndpoint.healthScore.overall, icon: '❤️' },
+                            { label: '보안', value: selectedEndpoint.healthScore.security, icon: '🔒' },
+                            { label: '문서화', value: selectedEndpoint.healthScore.documentation, icon: '📚' },
+                            { label: '성능', value: selectedEndpoint.healthScore.performance, icon: '⚡' },
+                            { label: '네이밍', value: selectedEndpoint.healthScore.naming, icon: '🏷️' },
                           ].map(item => (
-                            <div key={item.key} className={`rounded-lg p-2 ${
-                              item.value >= 80 ? 'bg-green-100 dark:bg-green-900/30' :
-                              item.value >= 60 ? 'bg-blue-100 dark:bg-blue-900/30' :
-                              item.value >= 40 ? 'bg-yellow-100 dark:bg-yellow-900/30' :
-                              'bg-red-100 dark:bg-red-900/30'
-                            }`}>
-                              <div className={`text-lg font-bold ${
-                                item.value >= 80 ? 'text-green-600 dark:text-green-400' :
-                                item.value >= 60 ? 'text-blue-600 dark:text-blue-400' :
-                                item.value >= 40 ? 'text-yellow-600 dark:text-yellow-400' :
-                                'text-red-600 dark:text-red-400'
-                              }`}>{item.value}</div>
-                              <div className="text-[10px] text-gray-500">{item.label}</div>
+                            <div key={item.label} className="flex items-center gap-2">
+                              <span className="text-xs w-20 flex items-center gap-1">
+                                <span>{item.icon}</span>
+                                <span className="text-gray-600 dark:text-gray-400">{item.label}</span>
+                              </span>
+                              <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <motion.div
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${item.value}%` }}
+                                  transition={{ duration: 0.8, ease: 'easeOut' }}
+                                  className={`h-full rounded-full ${
+                                    item.value >= 80 ? 'bg-gradient-to-r from-green-400 to-green-500' :
+                                    item.value >= 60 ? 'bg-gradient-to-r from-blue-400 to-blue-500' :
+                                    item.value >= 40 ? 'bg-gradient-to-r from-yellow-400 to-yellow-500' :
+                                    'bg-gradient-to-r from-red-400 to-red-500'
+                                  }`}
+                                />
+                              </div>
+                              <span className={`text-xs font-bold w-8 text-right ${
+                                item.value >= 80 ? 'text-green-600' :
+                                item.value >= 60 ? 'text-blue-600' :
+                                item.value >= 40 ? 'text-yellow-600' :
+                                'text-red-600'
+                              }`}>{item.value}</span>
                             </div>
                           ))}
                         </div>
+                        
+                        {/* v7: Improvement Recommendations */}
+                        {selectedEndpoint.healthScore.overall < 80 && (
+                          <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-600">
+                            <h5 className="text-[10px] font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                              <Sparkles className="w-3 h-3" /> 개선 추천
+                            </h5>
+                            <div className="space-y-1">
+                              {selectedEndpoint.healthScore.security < 60 && (
+                                <div className="text-[10px] text-orange-600 dark:text-orange-400 flex items-start gap-1">
+                                  <span>•</span> 인증 및 Rate Limiting 추가 필요
+                                </div>
+                              )}
+                              {selectedEndpoint.healthScore.documentation < 60 && (
+                                <div className="text-[10px] text-orange-600 dark:text-orange-400 flex items-start gap-1">
+                                  <span>•</span> JSDoc/OpenAPI 문서 추가 권장
+                                </div>
+                              )}
+                              {selectedEndpoint.healthScore.performance < 60 && (
+                                <div className="text-[10px] text-orange-600 dark:text-orange-400 flex items-start gap-1">
+                                  <span>•</span> 캐싱 또는 페이지네이션 고려
+                                </div>
+                              )}
+                              {selectedEndpoint.healthScore.naming < 60 && (
+                                <div className="text-[10px] text-orange-600 dark:text-orange-400 flex items-start gap-1">
+                                  <span>•</span> RESTful 네이밍 규칙 검토 필요
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                     
-                    {/* 복잡도 */}
-                    {selectedEndpoint.complexity && (
-                      <div>
-                        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
-                          <Gauge className="w-3.5 h-3.5" /> 복잡도
+                    {/* v7: Documentation Score Breakdown */}
+                    {selectedEndpoint.documentationScore && (
+                      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4">
+                        <h4 className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase mb-3 flex items-center gap-1">
+                          <FileText className="w-3.5 h-3.5" /> 문서화 분석
                         </h4>
-                        <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                          <div className="flex items-center gap-3 mb-2">
-                            <span className={`text-2xl font-bold ${
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            { label: '설명', value: selectedEndpoint.documentationScore.hasDescription, icon: '📝' },
+                            { label: '파라미터 문서', value: selectedEndpoint.documentationScore.hasParameterDocs, icon: '📋' },
+                            { label: '응답 문서', value: selectedEndpoint.documentationScore.hasResponseDocs, icon: '📤' },
+                            { label: '예제', value: selectedEndpoint.documentationScore.hasExamples, icon: '💡' },
+                          ].map(item => (
+                            <div key={item.label} className={`flex items-center gap-2 text-xs p-2 rounded ${
+                              item.value ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-800 text-gray-500'
+                            }`}>
+                              <span>{item.icon}</span>
+                              <span>{item.label}</span>
+                              {item.value ? <CheckCircle className="w-3 h-3 ml-auto" /> : <XCircle className="w-3 h-3 ml-auto opacity-50" />}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-3 text-center">
+                          <span className={`text-2xl font-bold ${
+                            selectedEndpoint.documentationScore.score >= 80 ? 'text-green-600' :
+                            selectedEndpoint.documentationScore.score >= 50 ? 'text-blue-600' :
+                            'text-red-600'
+                          }`}>{selectedEndpoint.documentationScore.score}</span>
+                          <span className="text-xs text-gray-400">/100 문서화 점수</span>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* v7: Performance Analysis */}
+                    {selectedEndpoint.performance && (
+                      <div className="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-4">
+                        <h4 className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase mb-3 flex items-center gap-1">
+                          <Zap className="w-3.5 h-3.5" /> 성능 분석
+                        </h4>
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div className={`p-2 rounded-lg ${selectedEndpoint.performance.hasCaching ? 'bg-green-100 dark:bg-green-900/30' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                            <div className="text-lg">{selectedEndpoint.performance.hasCaching ? '✅' : '❌'}</div>
+                            <div className="text-[10px] text-gray-500">캐싱</div>
+                          </div>
+                          <div className={`p-2 rounded-lg ${selectedEndpoint.performance.hasCompression ? 'bg-green-100 dark:bg-green-900/30' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                            <div className="text-lg">{selectedEndpoint.performance.hasCompression ? '✅' : '❌'}</div>
+                            <div className="text-[10px] text-gray-500">압축</div>
+                          </div>
+                          <div className={`p-2 rounded-lg ${selectedEndpoint.performance.hasPagination ? 'bg-green-100 dark:bg-green-900/30' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                            <div className="text-lg">{selectedEndpoint.performance.hasPagination ? '✅' : '❌'}</div>
+                            <div className="text-[10px] text-gray-500">페이징</div>
+                          </div>
+                        </div>
+                        {selectedEndpoint.performance.estimatedLatency && (
+                          <div className="mt-3 flex items-center justify-center gap-2">
+                            <span className="text-xs text-gray-500">예상 지연:</span>
+                            <span className={`px-2 py-0.5 text-xs font-medium rounded ${
+                              selectedEndpoint.performance.estimatedLatency === 'low' ? 'bg-green-100 text-green-700' :
+                              selectedEndpoint.performance.estimatedLatency === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>
+                              {selectedEndpoint.performance.estimatedLatency === 'low' ? '🚀 빠름' :
+                               selectedEndpoint.performance.estimatedLatency === 'medium' ? '⚡ 보통' : '🐢 느림'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* v7: Enhanced Naming Convention */}
+                    {selectedEndpoint.namingConvention && (
+                      <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-4">
+                        <h4 className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase mb-3 flex items-center gap-1">
+                          <Target className="w-3.5 h-3.5" /> 네이밍 규칙
+                        </h4>
+                        <div className="flex flex-wrap gap-2 mb-3">
+                          <span className={`px-2 py-1 text-[10px] rounded ${selectedEndpoint.namingConvention.followsRESTful ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {selectedEndpoint.namingConvention.followsRESTful ? '✓' : '✗'} RESTful
+                          </span>
+                          <span className={`px-2 py-1 text-[10px] rounded ${selectedEndpoint.namingConvention.usesKebabCase ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                            kebab-case
+                          </span>
+                          <span className={`px-2 py-1 text-[10px] rounded ${selectedEndpoint.namingConvention.usesSnakeCase ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                            snake_case
+                          </span>
+                          <span className={`px-2 py-1 text-[10px] rounded ${selectedEndpoint.namingConvention.usesCamelCase ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+                            camelCase
+                          </span>
+                        </div>
+                        {selectedEndpoint.namingConvention.issues.length > 0 && (
+                          <div className="space-y-1">
+                            {selectedEndpoint.namingConvention.issues.map((issue, i) => (
+                              <div key={i} className="text-[10px] text-orange-600 flex items-start gap-1">
+                                <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                                {issue}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* 복잡도 - v7: Enhanced visualization */}
+                    {selectedEndpoint.complexity && (
+                      <div className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700/50 rounded-xl p-4">
+                        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                          <Gauge className="w-3.5 h-3.5" /> 복잡도 분석
+                        </h4>
+                        <div className="flex items-center gap-4">
+                          {/* Circular gauge */}
+                          <div className="relative w-20 h-20">
+                            <svg className="w-20 h-20 transform -rotate-90">
+                              <circle cx="40" cy="40" r="34" fill="none" stroke="currentColor" strokeWidth="6" className="text-gray-200 dark:text-gray-700" />
+                              <circle
+                                cx="40" cy="40" r="34"
+                                fill="none"
+                                strokeWidth="6"
+                                strokeLinecap="round"
+                                stroke={selectedEndpoint.complexity.score <= 3 ? '#22c55e' : selectedEndpoint.complexity.score <= 6 ? '#eab308' : '#ef4444'}
+                                strokeDasharray={`${(selectedEndpoint.complexity.score / 10) * 213.6} 213.6`}
+                              />
+                            </svg>
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <span className={`text-xl font-bold ${
+                                selectedEndpoint.complexity.score <= 3 ? 'text-green-600' :
+                                selectedEndpoint.complexity.score <= 6 ? 'text-yellow-600' :
+                                'text-red-600'
+                              }`}>{selectedEndpoint.complexity.score}</span>
+                            </div>
+                          </div>
+                          <div className="flex-1">
+                            <div className={`text-sm font-medium mb-1 ${
                               selectedEndpoint.complexity.score <= 3 ? 'text-green-600' :
                               selectedEndpoint.complexity.score <= 6 ? 'text-yellow-600' :
                               'text-red-600'
-                            }`}>{selectedEndpoint.complexity.score}</span>
-                            <span className="text-xs text-gray-500">/ 10</span>
-                          </div>
-                          {selectedEndpoint.complexity.factors.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {selectedEndpoint.complexity.factors.map((f, i) => (
-                                <span key={i} className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 text-[10px] rounded">
-                                  {f}
-                                </span>
-                              ))}
+                            }`}>
+                              {selectedEndpoint.complexity.score <= 3 ? '간단함' :
+                               selectedEndpoint.complexity.score <= 6 ? '보통' : '복잡함'}
                             </div>
-                          )}
+                            {selectedEndpoint.complexity.cyclomaticComplexity && (
+                              <div className="text-[10px] text-gray-400">
+                                순환 복잡도: {selectedEndpoint.complexity.cyclomaticComplexity}
+                              </div>
+                            )}
+                            {selectedEndpoint.complexity.factors.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-2">
+                                {selectedEndpoint.complexity.factors.slice(0, 3).map((f, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 text-[9px] rounded">
+                                    {f}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )}
                     
-                    {/* 보안 분석 */}
+                    {/* 보안 분석 - v7: Enhanced */}
                     {selectedEndpoint.securityAnalysis && (
-                      <div>
-                        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                      <div className="bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-900/20 dark:to-orange-900/20 rounded-xl p-4">
+                        <h4 className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase mb-3 flex items-center gap-1">
                           <Shield className="w-3.5 h-3.5" /> 보안 분석
                         </h4>
-                        <div className="space-y-2">
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className={`flex items-center gap-1.5 text-xs p-2 rounded ${selectedEndpoint.securityAnalysis.hasAuth ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                              {selectedEndpoint.securityAnalysis.hasAuth ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
-                              인증
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                          {[
+                            { label: '인증', value: selectedEndpoint.securityAnalysis.hasAuth, critical: true },
+                            { label: 'Rate Limit', value: selectedEndpoint.securityAnalysis.hasRateLimit, critical: false },
+                            { label: '입력 검증', value: selectedEndpoint.securityAnalysis.hasInputValidation, critical: false },
+                            { label: '데이터 정화', value: selectedEndpoint.securityAnalysis.hasSanitization, critical: false },
+                          ].map(item => (
+                            <div key={item.label} className={`flex items-center gap-2 text-xs p-2 rounded-lg ${
+                              item.value ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' :
+                              item.critical ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                              'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+                            }`}>
+                              {item.value ? <CheckCircle className="w-4 h-4" /> : item.critical ? <XCircle className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+                              <span className="font-medium">{item.label}</span>
                             </div>
-                            <div className={`flex items-center gap-1.5 text-xs p-2 rounded ${selectedEndpoint.securityAnalysis.hasRateLimit ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                              {selectedEndpoint.securityAnalysis.hasRateLimit ? <CheckCircle className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
-                              Rate Limit
-                            </div>
-                            <div className={`flex items-center gap-1.5 text-xs p-2 rounded ${selectedEndpoint.securityAnalysis.hasInputValidation ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                              {selectedEndpoint.securityAnalysis.hasInputValidation ? <CheckCircle className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
-                              입력 검증
-                            </div>
-                            <div className={`flex items-center gap-1.5 text-xs p-2 rounded ${selectedEndpoint.securityAnalysis.hasSanitization ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                              {selectedEndpoint.securityAnalysis.hasSanitization ? <CheckCircle className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
-                              정화
-                            </div>
-                          </div>
-                          {selectedEndpoint.securityAnalysis.issues.length > 0 && (
-                            <div className="space-y-1 mt-2">
-                              {selectedEndpoint.securityAnalysis.issues.slice(0, 3).map((issue, i) => (
-                                <div key={i} className={`text-xs p-2 rounded ${
-                                  issue.severity === 'critical' ? 'bg-red-100 text-red-800' :
-                                  issue.severity === 'high' ? 'bg-orange-100 text-orange-800' :
-                                  issue.severity === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                                  'bg-blue-100 text-blue-800'
-                                }`}>
-                                  <span className="font-medium uppercase">{issue.severity}</span>: {issue.message}
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                          ))}
                         </div>
+                        {selectedEndpoint.securityAnalysis.issues.length > 0 && (
+                          <div className="space-y-2">
+                            <h5 className="text-[10px] font-semibold text-gray-500 uppercase">보안 이슈</h5>
+                            {selectedEndpoint.securityAnalysis.issues.slice(0, 4).map((issue, i) => (
+                              <div key={i} className={`text-xs p-2 rounded-lg border-l-4 ${
+                                issue.severity === 'critical' ? 'bg-red-100 dark:bg-red-900/20 border-red-500 text-red-800 dark:text-red-300' :
+                                issue.severity === 'high' ? 'bg-orange-100 dark:bg-orange-900/20 border-orange-500 text-orange-800 dark:text-orange-300' :
+                                issue.severity === 'medium' ? 'bg-yellow-100 dark:bg-yellow-900/20 border-yellow-500 text-yellow-800 dark:text-yellow-300' :
+                                'bg-blue-100 dark:bg-blue-900/20 border-blue-500 text-blue-800 dark:text-blue-300'
+                              }`}>
+                                <div className="flex items-center gap-1 font-medium">
+                                  <span className="uppercase text-[10px]">{issue.severity}</span>
+                                </div>
+                                <div className="mt-0.5">{issue.message}</div>
+                                {issue.recommendation && (
+                                  <div className="text-[10px] mt-1 opacity-75">💡 {issue.recommendation}</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                     
-                    {/* 변경 위험도 */}
+                    {/* 변경 위험도 - v7: Enhanced */}
                     {selectedEndpoint.changeRisk && (
-                      <div>
-                        <h4 className="text-xs font-semibold text-gray-400 uppercase mb-2 flex items-center gap-1">
+                      <div className={`rounded-xl p-4 ${
+                        selectedEndpoint.changeRisk.level === 'high' ? 'bg-gradient-to-r from-red-100 to-red-50 dark:from-red-900/30 dark:to-red-800/20' :
+                        selectedEndpoint.changeRisk.level === 'medium' ? 'bg-gradient-to-r from-yellow-100 to-yellow-50 dark:from-yellow-900/30 dark:to-yellow-800/20' :
+                        'bg-gradient-to-r from-green-100 to-green-50 dark:from-green-900/30 dark:to-green-800/20'
+                      }`}>
+                        <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3 flex items-center gap-1">
                           <AlertTriangle className="w-3.5 h-3.5" /> 변경 위험도
                         </h4>
-                        <div className={`p-3 rounded-lg ${
-                          selectedEndpoint.changeRisk.level === 'high' ? 'bg-red-50 dark:bg-red-900/20' :
-                          selectedEndpoint.changeRisk.level === 'medium' ? 'bg-yellow-50 dark:bg-yellow-900/20' :
-                          'bg-green-50 dark:bg-green-900/20'
-                        }`}>
-                          <span className={`text-sm font-medium ${
-                            selectedEndpoint.changeRisk.level === 'high' ? 'text-red-600' :
-                            selectedEndpoint.changeRisk.level === 'medium' ? 'text-yellow-600' :
-                            'text-green-600'
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className={`px-3 py-1.5 rounded-lg text-sm font-bold ${
+                            selectedEndpoint.changeRisk.level === 'high' ? 'bg-red-500 text-white' :
+                            selectedEndpoint.changeRisk.level === 'medium' ? 'bg-yellow-500 text-white' :
+                            'bg-green-500 text-white'
                           }`}>
-                            {selectedEndpoint.changeRisk.level.toUpperCase()}
-                          </span>
+                            {selectedEndpoint.changeRisk.level === 'high' ? '⚠️ HIGH' :
+                             selectedEndpoint.changeRisk.level === 'medium' ? '⚡ MEDIUM' : '✅ LOW'}
+                          </div>
                           {selectedEndpoint.changeRisk.breakingChangeRisk && (
-                            <span className="ml-2 px-1.5 py-0.5 bg-red-200 text-red-800 text-[10px] rounded">
-                              Breaking Change 위험
+                            <span className="px-2 py-1 bg-red-200 dark:bg-red-900/50 text-red-800 dark:text-red-300 text-[10px] font-medium rounded flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3" /> Breaking Change 위험
                             </span>
                           )}
                         </div>
+                        {selectedEndpoint.changeRisk.dependentEndpoints && selectedEndpoint.changeRisk.dependentEndpoints.length > 0 && (
+                          <div className="text-[10px] text-gray-500">
+                            의존 엔드포인트: {selectedEndpoint.changeRisk.dependentEndpoints.length}개
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* v7: 분석 데이터 없음 표시 */}
+                    {!selectedEndpoint.healthScore && !selectedEndpoint.complexity && !selectedEndpoint.securityAnalysis && (
+                      <div className="text-center py-12 text-gray-400">
+                        <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                        <p className="text-sm">분석 데이터가 없습니다</p>
+                        <p className="text-xs mt-1">엔드포인트 분석을 실행해 주세요</p>
                       </div>
                     )}
                   </>
