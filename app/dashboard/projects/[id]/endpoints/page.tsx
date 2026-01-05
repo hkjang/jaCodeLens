@@ -51,7 +51,21 @@ import {
   Heart,
   TrendingUp,
   Box,
-  Link2
+  Link2,
+  // v6 new icons
+  Eye,
+  RotateCcw,
+  Sparkles,
+  Send,
+  Settings,
+  Target,
+  MoreVertical,
+  Bookmark,
+  CheckSquare,
+  Square,
+  ArrowUp,
+  Shuffle,
+  Server
 } from 'lucide-react';
 
 interface ApiParameter {
@@ -196,6 +210,25 @@ interface ApiGroup {
   endpoints: ApiEndpoint[];
 }
 
+// v6 새로운 인터페이스
+interface RequestHistoryItem {
+  id: string;
+  endpointId: string;
+  method: string;
+  path: string;
+  timestamp: Date;
+  status: number;
+  responseTime: number;
+  request: { headers: string; body: string; queryParams: string };
+  response: string;
+}
+
+interface Environment {
+  name: string;
+  baseUrl: string;
+  variables: Record<string, string>;
+}
+
 const methodColors: Record<string, { bg: string; text: string; border: string }> = {
   GET: { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-700 dark:text-green-400', border: 'border-green-300 dark:border-green-700' },
   POST: { bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-700 dark:text-blue-400', border: 'border-blue-300 dark:border-blue-700' },
@@ -272,6 +305,27 @@ export default function ApiEndpointsPage() {
   
   // 최근 본 엔드포인트
   const [recentlyViewed, setRecentlyViewed] = useState<string[]>([]);
+  
+  // v6 추가 기능
+  const [requestHistory, setRequestHistory] = useState<RequestHistoryItem[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(`api-request-history-${projectId}`);
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+  const [environments, setEnvironments] = useState<Environment[]>([
+    { name: 'Local', baseUrl: 'http://localhost:3000', variables: {} },
+    { name: 'Staging', baseUrl: 'https://staging.api.example.com', variables: { 'API_KEY': 'stg_key' } },
+    { name: 'Production', baseUrl: 'https://api.example.com', variables: { 'API_KEY': 'prod_key' } },
+  ]);
+  const [selectedEnv, setSelectedEnv] = useState(0);
+  const [batchSelectMode, setBatchSelectMode] = useState(false);
+  const [batchSelectedIds, setBatchSelectedIds] = useState<Set<string>>(new Set());
+  const [showFab, setShowFab] = useState(true);
+  const [showRadarChart, setShowRadarChart] = useState(false);
+  const [showRequestHistory, setShowRequestHistory] = useState(false);
+  const [showEnvSettings, setShowEnvSettings] = useState(false);
   
   // 데이터 로드
   useEffect(() => {
@@ -429,7 +483,18 @@ export default function ApiEndpointsPage() {
   
   // 엔드포인트 선택 핸들러 (비교 모드 지원)
   const handleEndpointSelect = useCallback((ep: ApiEndpoint) => {
-    if (compareMode) {
+    if (batchSelectMode) {
+      // 배치 선택 모드: 선택 토글
+      setBatchSelectedIds(prev => {
+        const next = new Set(prev);
+        if (next.has(ep.id)) {
+          next.delete(ep.id);
+        } else {
+          next.add(ep.id);
+        }
+        return next;
+      });
+    } else if (compareMode) {
       // 비교 모드: 비교 패널에 추가
       setCompareEndpoints(prev => {
         if (!prev[0]) return [ep, prev[1]];
@@ -442,7 +507,86 @@ export default function ApiEndpointsPage() {
       setRecentlyViewed(prev => [ep.id, ...prev.filter(id => id !== ep.id)].slice(0, 10));
       setDetailTab('info');
     }
-  }, [compareMode]);
+  }, [compareMode, batchSelectMode]);
+  
+  // v6: 요청 기록 추가
+  const addRequestHistory = useCallback((item: Omit<RequestHistoryItem, 'id' | 'timestamp'>) => {
+    const newItem: RequestHistoryItem = {
+      ...item,
+      id: `req-${Date.now()}`,
+      timestamp: new Date(),
+    };
+    setRequestHistory(prev => {
+      const updated = [newItem, ...prev].slice(0, 20);
+      localStorage.setItem(`api-request-history-${projectId}`, JSON.stringify(updated));
+      return updated;
+    });
+  }, [projectId]);
+  
+  // v6: 배치 선택 토글
+  const toggleBatchSelect = useCallback((id: string) => {
+    setBatchSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+  
+  // v6: 전체 선택/해제
+  const toggleSelectAll = useCallback(() => {
+    if (batchSelectedIds.size === filteredEndpoints.length) {
+      setBatchSelectedIds(new Set());
+    } else {
+      setBatchSelectedIds(new Set(filteredEndpoints.map(ep => ep.id)));
+    }
+  }, [batchSelectedIds.size, filteredEndpoints]);
+  
+  // v6: 선택된 엔드포인트 일괄 내보내기
+  const exportSelectedEndpoints = useCallback(() => {
+    const selected = endpoints.filter(ep => batchSelectedIds.has(ep.id));
+    if (selected.length === 0) return;
+    
+    let md = `# Selected API Endpoints\n\n`;
+    md += `> Exported ${selected.length} endpoints on ${new Date().toLocaleDateString()}\n\n`;
+    md += `| Method | Path | Handler |\n`;
+    md += `|--------|------|--------|\n`;
+    
+    for (const ep of selected) {
+      md += `| \`${ep.method}\` | \`${ep.path}\` | ${ep.handler} |\n`;
+    }
+    
+    downloadFile(md, `selected-endpoints.md`, 'text/markdown');
+    setBatchSelectMode(false);
+    setBatchSelectedIds(new Set());
+  }, [endpoints, batchSelectedIds]);
+  
+  // v6: 선택된 엔드포인트 경로 일괄 복사
+  const copySelectedPaths = useCallback(() => {
+    const selected = endpoints.filter(ep => batchSelectedIds.has(ep.id));
+    const paths = selected.map(ep => `${ep.method} ${ep.path}`).join('\n');
+    navigator.clipboard.writeText(paths);
+    setCopied('batch-paths');
+    setTimeout(() => setCopied(null), 2000);
+  }, [endpoints, batchSelectedIds]);
+  
+  // v6: 맨 위로 스크롤
+  const scrollToTop = useCallback(() => {
+    const main = document.querySelector('main');
+    if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+  
+  // v6: 랜덤 엔드포인트 선택
+  const selectRandomEndpoint = useCallback(() => {
+    if (filteredEndpoints.length === 0) return;
+    const random = filteredEndpoints[Math.floor(Math.random() * filteredEndpoints.length)];
+    setSelectedEndpoint(random);
+    setDetailTab('info');
+  }, [filteredEndpoints]);
+
   
   // OpenAPI 3.0 내보내기
   const exportToOpenAPI = useCallback(() => {
@@ -579,9 +723,64 @@ export default function ApiEndpointsPage() {
   }
   
   return (
-    <div className="h-[calc(100vh-6rem)] flex flex-col bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-sm">
-      {/* 헤더 */}
-      <header className="flex items-center justify-between px-6 py-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0 bg-gradient-to-r from-white to-gray-50 dark:from-gray-800 dark:to-gray-900">
+    <div className="h-[calc(100vh-6rem)] flex flex-col bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-sm relative">
+      {/* v6: 애니메이션 그라데이션 오버레이 */}
+      <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-cyan-500/10 animate-pulse pointer-events-none" />
+      
+      {/* v6: 배치 선택 모드 액션바 */}
+      <AnimatePresence>
+        {batchSelectMode && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-2 flex items-center justify-between flex-shrink-0 z-10"
+          >
+            <div className="flex items-center gap-3">
+              <button
+                onClick={toggleSelectAll}
+                className="flex items-center gap-1.5 px-3 py-1 bg-white/20 rounded-lg text-sm hover:bg-white/30 transition"
+              >
+                {batchSelectedIds.size === filteredEndpoints.length ? (
+                  <><CheckSquare className="w-4 h-4" /> 전체 해제</>
+                ) : (
+                  <><Square className="w-4 h-4" /> 전체 선택</>
+                )}
+              </button>
+              <span className="text-sm opacity-80">
+                {batchSelectedIds.size}개 선택됨
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={copySelectedPaths}
+                disabled={batchSelectedIds.size === 0}
+                className="flex items-center gap-1.5 px-3 py-1 bg-white/20 rounded-lg text-sm hover:bg-white/30 transition disabled:opacity-50"
+              >
+                {copied === 'batch-paths' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                경로 복사
+              </button>
+              <button
+                onClick={exportSelectedEndpoints}
+                disabled={batchSelectedIds.size === 0}
+                className="flex items-center gap-1.5 px-3 py-1 bg-white/20 rounded-lg text-sm hover:bg-white/30 transition disabled:opacity-50"
+              >
+                <Download className="w-4 h-4" />
+                내보내기
+              </button>
+              <button
+                onClick={() => { setBatchSelectMode(false); setBatchSelectedIds(new Set()); }}
+                className="p-1.5 hover:bg-white/20 rounded-lg transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* 헤더 - v6: glassmorphism 효과 */}
+      <header className="flex items-center justify-between px-6 py-3 border-b border-gray-200/50 dark:border-gray-700/50 flex-shrink-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm relative z-10">
         <div className="flex items-center gap-4">
           <button
             onClick={() => router.push(`/dashboard/projects/${projectId}/code-elements`)}
@@ -591,11 +790,14 @@ export default function ApiEndpointsPage() {
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
           </button>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-green-500 to-teal-600 rounded-xl flex items-center justify-center shadow-lg">
+            <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-600 rounded-xl flex items-center justify-center shadow-lg shadow-teal-500/25 animate-pulse">
               <Globe className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-gray-900 dark:text-white">API Endpoints Map</h1>
+              <h1 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                API Endpoints Map
+                <Sparkles className="w-4 h-4 text-yellow-500" />
+              </h1>
               <p className="text-xs text-gray-500 flex items-center gap-2">
                 <span>{projectName}</span>
                 <span>•</span>
@@ -612,20 +814,52 @@ export default function ApiEndpointsPage() {
             </div>
           </div>
           
+          {/* v6: 환경 선택기 */}
+          <div className="relative ml-4">
+            <select
+              value={selectedEnv}
+              onChange={e => setSelectedEnv(Number(e.target.value))}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 dark:bg-gray-700 border-0 focus:ring-2 focus:ring-teal-500 cursor-pointer appearance-none pr-8"
+            >
+              {environments.map((env, idx) => (
+                <option key={env.name} value={idx}>
+                  🌐 {env.name}
+                </option>
+              ))}
+            </select>
+            <Server className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+          </div>
+          
           {/* 검색 */}
-          <div className="relative ml-6">
+          <div className="relative ml-4">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
               placeholder="엔드포인트 검색..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="pl-10 pr-4 py-2 w-64 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              className="pl-10 pr-4 py-2 w-56 bg-gray-100 dark:bg-gray-700 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:outline-none"
             />
           </div>
         </div>
         
         <div className="flex items-center gap-2">
+          {/* v6: 배치 선택 모드 버튼 */}
+          <button
+            onClick={() => { setBatchSelectMode(!batchSelectMode); if (batchSelectMode) setBatchSelectedIds(new Set()); }}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition flex items-center gap-1 ${
+              batchSelectMode
+                ? 'bg-purple-500 text-white'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+            }`}
+            title="일괄 선택"
+          >
+            <CheckSquare className="w-3.5 h-3.5" />
+            일괄
+          </button>
+          
+          <div className="w-px h-6 bg-gray-200 dark:bg-gray-700" />
+          
           {/* 메서드 필터 */}
           {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map(method => (
             <button
@@ -1440,14 +1674,19 @@ export default function ApiEndpointsPage() {
                 {/* Test 탭 (Try It Now) */}
                 {detailTab === 'test' && (
                   <div className="space-y-4">
-                    {/* 요청 URL 미리보기 */}
+                    {/* 요청 URL 미리보기 - v6: 환경 표시 */}
                     <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] px-1.5 py-0.5 bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 rounded">
+                          {environments[selectedEnv]?.name || 'Local'}
+                        </span>
+                      </div>
                       <div className="flex items-center gap-2">
                         <span className={`px-2 py-0.5 text-xs font-bold rounded ${methodColors[selectedEndpoint.method].bg} ${methodColors[selectedEndpoint.method].text}`}>
                           {selectedEndpoint.method}
                         </span>
                         <code className="text-sm text-gray-700 dark:text-gray-300 break-all">
-                          http://localhost:3000{selectedEndpoint.path}{testRequest.queryParams ? `?${testRequest.queryParams}` : ''}
+                          {environments[selectedEnv]?.baseUrl || 'http://localhost:3000'}{selectedEndpoint.path}{testRequest.queryParams ? `?${testRequest.queryParams}` : ''}
                         </code>
                       </div>
                     </div>
@@ -1490,11 +1729,14 @@ export default function ApiEndpointsPage() {
                     {/* Execute Button */}
                     <button
                       onClick={async () => {
+                        if (!selectedEndpoint) return;
                         setIsTestLoading(true);
                         setTestResponse(null);
                         const startTime = Date.now();
                         try {
-                          const url = `http://localhost:3000${selectedEndpoint.path}${testRequest.queryParams ? `?${testRequest.queryParams}` : ''}`;
+                          // v6: Use selected environment's baseUrl
+                          const baseUrl = environments[selectedEnv]?.baseUrl || 'http://localhost:3000';
+                          const url = `${baseUrl}${selectedEndpoint.path}${testRequest.queryParams ? `?${testRequest.queryParams}` : ''}`;
                           const headers = JSON.parse(testRequest.headers);
                           const options: RequestInit = {
                             method: selectedEndpoint.method,
@@ -1505,16 +1747,30 @@ export default function ApiEndpointsPage() {
                           }
                           const res = await fetch(url, options);
                           const body = await res.text();
+                          const responseTime = Date.now() - startTime;
+                          
                           setTestResponse({
                             status: res.status,
                             body: body,
-                            time: Date.now() - startTime,
+                            time: responseTime,
+                          });
+                          
+                          // v6: Save to request history
+                          addRequestHistory({
+                            endpointId: selectedEndpoint.id,
+                            method: selectedEndpoint.method,
+                            path: selectedEndpoint.path,
+                            status: res.status,
+                            responseTime: responseTime,
+                            request: testRequest,
+                            response: body.substring(0, 500),
                           });
                         } catch (err) {
+                          const responseTime = Date.now() - startTime;
                           setTestResponse({
                             status: 0,
                             body: err instanceof Error ? err.message : 'Request failed',
-                            time: Date.now() - startTime,
+                            time: responseTime,
                           });
                         } finally {
                           setIsTestLoading(false);
@@ -1858,6 +2114,155 @@ export default function ApiEndpointsPage() {
           )}
         </motion.div>
       )}
+      
+      {/* v6: Floating Action Button (FAB) */}
+      <AnimatePresence>
+        {showFab && (
+          <motion.div
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0, opacity: 0 }}
+            className="fixed bottom-6 right-6 z-40 flex flex-col-reverse items-center gap-2"
+          >
+            {/* Main FAB */}
+            <button
+              onClick={() => setShowFab(true)}
+              className="w-14 h-14 bg-gradient-to-br from-teal-500 to-cyan-600 text-white rounded-full shadow-lg shadow-teal-500/25 flex items-center justify-center hover:scale-110 transition-transform"
+            >
+              <Sparkles className="w-6 h-6" />
+            </button>
+            
+            {/* FAB Actions */}
+            <div className="flex flex-col gap-2">
+              <motion.button
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ delay: 0.1 }}
+                onClick={scrollToTop}
+                className="w-10 h-10 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform border border-gray-200 dark:border-gray-700"
+                title="맨 위로"
+              >
+                <ArrowUp className="w-4 h-4" />
+              </motion.button>
+              
+              <motion.button
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ delay: 0.15 }}
+                onClick={selectRandomEndpoint}
+                className="w-10 h-10 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform border border-gray-200 dark:border-gray-700"
+                title="랜덤 엔드포인트"
+              >
+                <Shuffle className="w-4 h-4" />
+              </motion.button>
+              
+              <motion.button
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ delay: 0.2 }}
+                onClick={() => setShowStats(!showStats)}
+                className="w-10 h-10 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform border border-gray-200 dark:border-gray-700"
+                title="통계 토글"
+              >
+                <PieChart className="w-4 h-4" />
+              </motion.button>
+              
+              <motion.button
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ delay: 0.25 }}
+                onClick={() => setShowRequestHistory(true)}
+                className="w-10 h-10 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-full shadow-lg flex items-center justify-center hover:scale-110 transition-transform border border-gray-200 dark:border-gray-700"
+                title="요청 기록"
+              >
+                <History className="w-4 h-4" />
+              </motion.button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* v6: Request History Modal */}
+      <AnimatePresence>
+        {showRequestHistory && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+            onClick={() => setShowRequestHistory(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-2xl w-full mx-4 shadow-2xl max-h-[80vh] overflow-hidden flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <History className="w-5 h-5 text-purple-500" />
+                  요청 기록
+                </h3>
+                <button onClick={() => setShowRequestHistory(false)} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto">
+                {requestHistory.length === 0 ? (
+                  <div className="text-center py-12 text-gray-400">
+                    <History className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>아직 요청 기록이 없습니다</p>
+                    <p className="text-sm mt-1">Test 탭에서 API를 테스트해보세요</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {requestHistory.map(item => (
+                      <div key={item.id} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${methodColors[item.method]?.bg || 'bg-gray-100'} ${methodColors[item.method]?.text || 'text-gray-700'}`}>
+                              {item.method}
+                            </span>
+                            <code className="text-xs text-gray-600 dark:text-gray-300 truncate max-w-[300px]">{item.path}</code>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className={`px-2 py-0.5 rounded font-mono ${
+                              item.status >= 200 && item.status < 300 ? 'bg-green-100 text-green-700' :
+                              item.status >= 400 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'
+                            }`}>
+                              {item.status}
+                            </span>
+                            <span className="text-gray-400">{item.responseTime}ms</span>
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-gray-400">
+                          {new Date(item.timestamp).toLocaleString()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              
+              {requestHistory.length > 0 && (
+                <div className="pt-4 border-t border-gray-200 dark:border-gray-700 mt-4">
+                  <button
+                    onClick={() => {
+                      setRequestHistory([]);
+                      localStorage.removeItem(`api-request-history-${projectId}`);
+                    }}
+                    className="text-sm text-red-500 hover:text-red-600"
+                  >
+                    기록 삭제
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
