@@ -191,8 +191,8 @@ export class PipelineExecutionService {
         }
       }
 
-      // 7. 완료 처리
-      const analysisScore = Math.max(0, 100 - (result.summary.totalIssues * 2));
+      // 7. 완료 처리 - 카테고리별 가중치가 적용된 정교한 점수 계산
+      const analysisScore = this.calculateHealthScore(result);
       job.status = 'completed';
       job.completedAt = new Date();
       await this.updateExecutionStatus(executeId, 'COMPLETED', analysisScore);
@@ -511,6 +511,64 @@ export async function handleRequest(req: Request): Promise<string> {
     runningJobs.delete(executeId);
 
     return true;
+  }
+
+  /**
+   * 건강도 점수 계산 (health API와 동일한 로직)
+   * 카테고리별 가중치가 적용된 정교한 점수 계산
+   */
+  private calculateHealthScore(result: PipelineResult): number {
+    // 카테고리별 이슈 통계 계산
+    const categoryStats: Record<string, { total: number; critical: number; high: number }> = {
+      security: { total: 0, critical: 0, high: 0 },
+      quality: { total: 0, critical: 0, high: 0 },
+      structure: { total: 0, critical: 0, high: 0 },
+      operations: { total: 0, critical: 0, high: 0 },
+      test: { total: 0, critical: 0, high: 0 }
+    };
+
+    for (const r of result.normalizedResults) {
+      const cat = r.mainCategory?.toLowerCase() || 'quality';
+      const key = cat === 'security' ? 'security' :
+                  cat === 'quality' || cat === 'standards' ? 'quality' :
+                  cat === 'structure' ? 'structure' :
+                  cat === 'operations' ? 'operations' :
+                  cat === 'test' ? 'test' : 'quality';
+      
+      if (categoryStats[key]) {
+        categoryStats[key].total++;
+        if (r.severity === 'CRITICAL') categoryStats[key].critical++;
+        if (r.severity === 'HIGH') categoryStats[key].high++;
+      }
+    }
+
+    // 카테고리별 점수 계산 (로그 스케일)
+    const calcScore = (stats: { total: number; critical: number; high: number }) => {
+      if (stats.total === 0) return 100;
+      
+      const weightedIssues = stats.critical * 2 + stats.high * 1.5 + (stats.total - stats.critical - stats.high);
+      const logPenalty = Math.log10(weightedIssues + 1) * 15;
+      const criticalPenalty = Math.min(15, stats.critical * 5);
+      const score = 100 - logPenalty - criticalPenalty;
+      
+      return Math.max(20, Math.min(100, Math.round(score)));
+    };
+
+    const securityScore = calcScore(categoryStats.security);
+    const qualityScore = calcScore(categoryStats.quality);
+    const structureScore = calcScore(categoryStats.structure);
+    const operationsScore = calcScore(categoryStats.operations);
+    const testScore = calcScore(categoryStats.test);
+
+    // 카테고리별 가중 평균 + 기본 점수
+    const weightedScore = 
+      securityScore * 0.25 + 
+      qualityScore * 0.10 +
+      structureScore * 0.35 +
+      operationsScore * 0.10 +
+      testScore * 0.20;
+    
+    return Math.min(100, Math.round(weightedScore + 20));
   }
 }
 

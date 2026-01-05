@@ -84,31 +84,96 @@ export async function getDashboardStats(projectId?: string): Promise<DashboardSt
       where: { executeId: latestExecution.id }
     });
 
+    // 카테고리별 이슈 통계 계산 (건강도 점수 계산용)
+    const categoryStats: Record<string, { total: number; critical: number; high: number }> = {
+      security: { total: 0, critical: 0, high: 0 },
+      quality: { total: 0, critical: 0, high: 0 },
+      structure: { total: 0, critical: 0, high: 0 },
+      operations: { total: 0, critical: 0, high: 0 },
+      test: { total: 0, critical: 0, high: 0 }
+    };
+
     // 통계 계산
     const stats: DashboardStats = {
       totalIssues: results.length,
-      criticalCount: results.filter(r => r.severity === 'CRITICAL').length,
-      highCount: results.filter(r => r.severity === 'HIGH').length,
-      mediumCount: results.filter(r => r.severity === 'MEDIUM').length,
-      lowCount: results.filter(r => r.severity === 'LOW').length,
-      infoCount: results.filter(r => r.severity === 'INFO').length,
+      criticalCount: 0,
+      highCount: 0,
+      mediumCount: 0,
+      lowCount: 0,
+      infoCount: 0,
       byCategory: {},
       byLanguage: {},
-      averageScore: latestExecution.score || 0,
+      averageScore: 0, // 이후 계산
       totalExecutions: await prisma.analysisExecute.count()
     };
 
-    // 카테고리별 집계
+    // 이슈 통계 및 카테고리별 분류
     for (const r of results) {
+      // 심각도별 집계
+      if (r.severity === 'CRITICAL') stats.criticalCount++;
+      else if (r.severity === 'HIGH') stats.highCount++;
+      else if (r.severity === 'MEDIUM') stats.mediumCount++;
+      else if (r.severity === 'LOW') stats.lowCount++;
+      else stats.infoCount++;
+
+      // 카테고리/언어별 집계
       stats.byCategory[r.mainCategory] = (stats.byCategory[r.mainCategory] || 0) + 1;
       stats.byLanguage[r.language] = (stats.byLanguage[r.language] || 0) + 1;
+
+      // 카테고리별 건강도 통계
+      const cat = r.mainCategory?.toLowerCase() || 'quality';
+      const key = cat === 'security' ? 'security' :
+                  cat === 'quality' || cat === 'standards' ? 'quality' :
+                  cat === 'structure' ? 'structure' :
+                  cat === 'operations' ? 'operations' :
+                  cat === 'test' ? 'test' : 'quality';
+      
+      if (categoryStats[key]) {
+        categoryStats[key].total++;
+        if (r.severity === 'CRITICAL') categoryStats[key].critical++;
+        if (r.severity === 'HIGH') categoryStats[key].high++;
+      }
     }
+
+    // 건강도 점수 실시간 계산 (health API와 동일한 로직)
+    stats.averageScore = calculateHealthScore(categoryStats);
 
     return stats;
   } catch (error) {
     console.error('Failed to get dashboard stats:', error);
     return getEmptyStats();
   }
+}
+
+/**
+ * 건강도 점수 계산 (health API와 동일한 로직)
+ */
+function calculateHealthScore(categoryStats: Record<string, { total: number; critical: number; high: number }>): number {
+  const calcScore = (stats: { total: number; critical: number; high: number }) => {
+    if (stats.total === 0) return 100;
+    
+    const weightedIssues = stats.critical * 2 + stats.high * 1.5 + (stats.total - stats.critical - stats.high);
+    const logPenalty = Math.log10(weightedIssues + 1) * 15;
+    const criticalPenalty = Math.min(15, stats.critical * 5);
+    const score = 100 - logPenalty - criticalPenalty;
+    
+    return Math.max(20, Math.min(100, Math.round(score)));
+  };
+
+  const securityScore = calcScore(categoryStats.security || { total: 0, critical: 0, high: 0 });
+  const qualityScore = calcScore(categoryStats.quality || { total: 0, critical: 0, high: 0 });
+  const structureScore = calcScore(categoryStats.structure || { total: 0, critical: 0, high: 0 });
+  const operationsScore = calcScore(categoryStats.operations || { total: 0, critical: 0, high: 0 });
+  const testScore = calcScore(categoryStats.test || { total: 0, critical: 0, high: 0 });
+
+  const weightedScore = 
+    securityScore * 0.25 + 
+    qualityScore * 0.10 +
+    structureScore * 0.35 +
+    operationsScore * 0.10 +
+    testScore * 0.20;
+  
+  return Math.min(100, Math.round(weightedScore + 20));
 }
 
 /**
