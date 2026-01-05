@@ -1833,11 +1833,83 @@ function extractCSharpParams(content: string, startIndex: number): { params: Api
 // Next.js App Router 파싱
 function parseNextJsAppRouter(projectPath: string): ApiEndpoint[] {
   const endpoints: ApiEndpoint[] = [];
-  const apiDir = join(projectPath, 'app', 'api');
   
-  if (!existsSync(apiDir)) return endpoints;
+  // 직접 위치의 API 디렉토리들 스캔
+  scanAllApiDirs(projectPath);
   
-  function scanDir(dir: string, basePath: string = '/api') {
+  // Monorepo 패턴 지원: apps/*, packages/* 하위 프로젝트도 스캔
+  const monorepoPatterns = ['apps', 'packages', 'services', 'projects'];
+  for (const pattern of monorepoPatterns) {
+    const monorepoDir = join(projectPath, pattern);
+    if (existsSync(monorepoDir)) {
+      try {
+        const subProjects = readdirSync(monorepoDir);
+        for (const subProject of subProjects) {
+          const subProjectPath = join(monorepoDir, subProject);
+          if (statSync(subProjectPath).isDirectory()) {
+            scanAllApiDirs(subProjectPath);
+          }
+        }
+      } catch (e) {}
+    }
+  }
+  
+  // 모든 가능한 API 디렉토리 스캔 헬퍼
+  function scanAllApiDirs(basePath: string) {
+    // App Router: app/api
+    const appApiDir = join(basePath, 'app', 'api');
+    if (existsSync(appApiDir)) {
+      scanAppRouter(appApiDir, '/api');
+    }
+    
+    // Pages Router: pages/api  
+    const pagesApiDir = join(basePath, 'pages', 'api');
+    if (existsSync(pagesApiDir)) {
+      scanPagesRouter(pagesApiDir, '/api');
+    }
+    
+    // src/app/api
+    const srcAppApiDir = join(basePath, 'src', 'app', 'api');
+    if (existsSync(srcAppApiDir)) {
+      scanAppRouter(srcAppApiDir, '/api');
+    }
+    
+    // src/pages/api
+    const srcPagesApiDir = join(basePath, 'src', 'pages', 'api');
+    if (existsSync(srcPagesApiDir)) {
+      scanPagesRouter(srcPagesApiDir, '/api');
+    }
+  }
+  
+  // App Router 스캔 (route.ts/route.js 파일 기반)
+  function scanAppRouter(dir: string, basePath: string = '/api') {
+    try {
+      const entries = readdirSync(dir);
+      
+      for (const entry of entries) {
+        const fullPath = join(dir, entry);
+        const stat = statSync(fullPath);
+        
+        if (stat.isDirectory()) {
+          // Dynamic route: [param] -> :param, [...param] -> :param*, [[...param]] -> :param?
+          let routePart = entry;
+          if (entry.startsWith('[[...') && entry.endsWith(']]')) {
+            routePart = `:${entry.slice(5, -2)}?`;
+          } else if (entry.startsWith('[...') && entry.endsWith(']')) {
+            routePart = `:${entry.slice(4, -1)}*`;
+          } else if (entry.startsWith('[') && entry.endsWith(']')) {
+            routePart = `:${entry.slice(1, -1)}`;
+          }
+          scanAppRouter(fullPath, `${basePath}/${routePart}`);
+        } else if (entry === 'route.ts' || entry === 'route.js') {
+          parseRouteFile(fullPath, basePath, 'app-router');
+        }
+      }
+    } catch (e) {}
+  }
+  
+  // Pages Router 스캔 (파일명 기반 라우팅)
+  function scanPagesRouter(dir: string, basePath: string = '/api') {
     try {
       const entries = readdirSync(dir);
       
@@ -1847,81 +1919,208 @@ function parseNextJsAppRouter(projectPath: string): ApiEndpoint[] {
         
         if (stat.isDirectory()) {
           // Dynamic route: [param] -> :param
-          const routePart = entry.startsWith('[') && entry.endsWith(']')
-            ? `:${entry.slice(1, -1)}`
-            : entry;
-          scanDir(fullPath, `${basePath}/${routePart}`);
-        } else if (entry === 'route.ts' || entry === 'route.js') {
-          // Parse route file
-          const content = readFileSync(fullPath, 'utf-8');
-          const relativePath = relative(projectPath, fullPath);
+          let routePart = entry;
+          if (entry.startsWith('[[...') && entry.endsWith(']]')) {
+            routePart = `:${entry.slice(5, -2)}?`;
+          } else if (entry.startsWith('[...') && entry.endsWith(']')) {
+            routePart = `:${entry.slice(4, -1)}*`;
+          } else if (entry.startsWith('[') && entry.endsWith(']')) {
+            routePart = `:${entry.slice(1, -1)}`;
+          }
+          scanPagesRouter(fullPath, `${basePath}/${routePart}`);
+        } else if ((entry.endsWith('.ts') || entry.endsWith('.js')) && !entry.endsWith('.d.ts')) {
+          // 파일명에서 라우트 경로 추출 (예: users.ts -> /api/users, [id].ts -> /api/:id)
+          let routeName = entry.replace(/\.(ts|js)$/, '');
           
-          // Find exported HTTP methods
-          const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
-          for (const method of methods) {
-            // Match: export async function GET, export function GET, export const GET
-            const funcRegex = new RegExp(`export\\s+(?:async\\s+)?function\\s+${method}\\s*\\(`, 'g');
-            const constRegex = new RegExp(`export\\s+const\\s+${method}\\s*=`, 'g');
-            
-            let match = funcRegex.exec(content) || constRegex.exec(content);
-            if (match) {
-              // Extract params from path
-              const params = (basePath.match(/:(\w+)/g) || []).map(p => p.slice(1));
-              
-              // Try to find description from comments
-              const beforeFunc = content.substring(Math.max(0, match.index - 200), match.index);
-              const descMatch = beforeFunc.match(/\/\*\*[\s\S]*?\*\/|\/\/.*$/m);
-              const description = descMatch 
-                ? descMatch[0].replace(/\/\*\*|\*\/|\*|\/\//g, '').trim().split('\n')[0]
-                : undefined;
-              
-              // Find line number
-              const lines = content.substring(0, match.index).split('\n');
-              const lineNumber = lines.length;
-              
-              // Check if async
-              const isAsync = content.substring(match.index, match.index + 50).includes('async');
-              
-              // 상세 파라미터 추출
-              const extracted = extractTsParams(content, match.index);
-              const auth = detectAuthType(content.substring(match.index, match.index + 500));
-              
-              // 경로 파라미터 추가
-              for (const p of params) {
-                extracted.params.push({
-                  name: p,
-                  type: 'string',
-                  required: true,
-                  in: 'path',
-                });
-              }
-              
-              endpoints.push({
-                id: `${method}-${basePath}`,
-                method: method as ApiEndpoint['method'],
-                path: basePath,
-                filePath: relativePath,
-                fileName: entry,
-                handler: method,
-                params,
-                parameters: extracted.params,
-                requestBody: extracted.body,
-                responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
-                description,
-                isAsync,
-                lineNumber,
-                framework: 'nextjs',
-                auth,
-                contentType: extracted.body?.contentType || 'application/json',
-              });
+          // index 파일은 현재 경로
+          if (routeName === 'index') {
+            parsePagesRouterFile(fullPath, basePath, entry);
+          } else {
+            // Dynamic route 처리
+            if (routeName.startsWith('[[...') && routeName.endsWith(']]')) {
+              routeName = `:${routeName.slice(5, -2)}?`;
+            } else if (routeName.startsWith('[...') && routeName.endsWith(']')) {
+              routeName = `:${routeName.slice(4, -1)}*`;
+            } else if (routeName.startsWith('[') && routeName.endsWith(']')) {
+              routeName = `:${routeName.slice(1, -1)}`;
             }
+            parsePagesRouterFile(fullPath, `${basePath}/${routeName}`, entry);
           }
         }
       }
     } catch (e) {}
   }
   
-  scanDir(apiDir);
+  // App Router route.ts/route.js 파일 파싱
+  function parseRouteFile(fullPath: string, basePath: string, routerType: string) {
+    try {
+      const content = readFileSync(fullPath, 'utf-8');
+      const relativePath = relative(projectPath, fullPath);
+      const fileName = fullPath.split(/[/\\]/).pop() || 'route.ts';
+      
+      // Find exported HTTP methods
+      const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
+      for (const method of methods) {
+        // Match: export async function GET, export function GET, export const GET
+        const funcRegex = new RegExp(`export\\s+(?:async\\s+)?function\\s+${method}\\s*\\(`, 'g');
+        const constRegex = new RegExp(`export\\s+const\\s+${method}\\s*=`, 'g');
+        
+        let match = funcRegex.exec(content) || constRegex.exec(content);
+        if (match) {
+          // Extract params from path
+          const params = (basePath.match(/:(\w+)/g) || []).map(p => p.slice(1));
+          
+          // Try to find description from comments
+          const beforeFunc = content.substring(Math.max(0, match.index - 200), match.index);
+          const descMatch = beforeFunc.match(/\/\*\*[\s\S]*?\*\/|\/\/.*$/m);
+          const description = descMatch 
+            ? descMatch[0].replace(/\/\*\*|\*\/|\*|\/\//g, '').trim().split('\n')[0]
+            : undefined;
+          
+          // Find line number
+          const lines = content.substring(0, match.index).split('\n');
+          const lineNumber = lines.length;
+          
+          // Check if async
+          const isAsync = content.substring(match.index, match.index + 50).includes('async');
+          
+          // 상세 파라미터 추출
+          const extracted = extractTsParams(content, match.index);
+          const auth = detectAuthType(content.substring(match.index, match.index + 500));
+          
+          // 경로 파라미터 추가
+          for (const p of params) {
+            extracted.params.push({
+              name: p,
+              type: 'string',
+              required: true,
+              in: 'path',
+            });
+          }
+          
+          endpoints.push({
+            id: `${method}-${basePath}`,
+            method: method as ApiEndpoint['method'],
+            path: basePath,
+            filePath: relativePath,
+            fileName,
+            handler: method,
+            params,
+            parameters: extracted.params,
+            requestBody: extracted.body,
+            responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+            description,
+            isAsync,
+            lineNumber,
+            framework: 'nextjs',
+            auth,
+            contentType: extracted.body?.contentType || 'application/json',
+          });
+        }
+      }
+    } catch (e) {}
+  }
+  
+  // Pages Router 파일 파싱 (default export handler 기반)
+  function parsePagesRouterFile(fullPath: string, routePath: string, fileName: string) {
+    try {
+      const content = readFileSync(fullPath, 'utf-8');
+      const relativePath = relative(projectPath, fullPath);
+      
+      // Pages Router는 default export handler 또는 named export (GET, POST 등)
+      // 1. Named exports 확인 (Next.js 13+ Pages API Routes)
+      const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'];
+      let foundNamedExport = false;
+      
+      for (const method of methods) {
+        const funcRegex = new RegExp(`export\\s+(?:async\\s+)?function\\s+${method}\\s*\\(`, 'g');
+        const constRegex = new RegExp(`export\\s+const\\s+${method}\\s*=`, 'g');
+        
+        let match = funcRegex.exec(content) || constRegex.exec(content);
+        if (match) {
+          foundNamedExport = true;
+          const params = (routePath.match(/:(\w+)/g) || []).map(p => p.slice(1));
+          const lines = content.substring(0, match.index).split('\n');
+          const lineNumber = lines.length;
+          const isAsync = content.substring(match.index, match.index + 50).includes('async');
+          
+          const extracted = extractTsParams(content, match.index);
+          const auth = detectAuthType(content.substring(match.index, match.index + 500));
+          
+          for (const p of params) {
+            extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+          }
+          
+          endpoints.push({
+            id: `${method}-${routePath}`,
+            method: method as ApiEndpoint['method'],
+            path: routePath,
+            filePath: relativePath,
+            fileName,
+            handler: method,
+            params,
+            parameters: extracted.params,
+            requestBody: extracted.body,
+            responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+            isAsync,
+            lineNumber,
+            framework: 'nextjs-pages',
+            auth,
+            contentType: extracted.body?.contentType || 'application/json',
+          });
+        }
+      }
+      
+      // 2. Default export handler 확인 (전통적인 Pages API Routes)
+      if (!foundNamedExport) {
+        // export default (req, res) => {} 또는 export default function handler(req, res) {}
+        const defaultExportRegex = /export\s+default\s+(?:async\s+)?(?:function\s+(\w+)?\s*\(|(?:const\s+\w+\s*=\s*)?\(?\s*(?:\w+|\{[^}]+\})\s*(?:,\s*(?:\w+|\{[^}]+\}))?\s*\)?\s*=>)/g;
+        const match = defaultExportRegex.exec(content);
+        
+        if (match) {
+          const params = (routePath.match(/:(\w+)/g) || []).map(p => p.slice(1));
+          const lines = content.substring(0, match.index).split('\n');
+          const lineNumber = lines.length;
+          const isAsync = content.substring(match.index, match.index + 80).includes('async');
+          
+          const extracted = extractTsParams(content, match.index);
+          const auth = detectAuthType(content.substring(match.index, match.index + 500));
+          
+          for (const p of params) {
+            extracted.params.push({ name: p, type: 'string', required: true, in: 'path' });
+          }
+          
+          // Default handler는 모든 HTTP 메서드를 처리할 수 있음
+          // req.method 기반 분기 체크
+          const methodChecks = content.match(/req\.method\s*===?\s*['"`](GET|POST|PUT|PATCH|DELETE)['"`]/gi);
+          const detectedMethods = methodChecks 
+            ? [...new Set(methodChecks.map(m => m.match(/(GET|POST|PUT|PATCH|DELETE)/i)?.[1]?.toUpperCase()).filter(Boolean))]
+            : ['GET', 'POST']; // 기본값
+          
+          for (const method of detectedMethods) {
+            endpoints.push({
+              id: `${method}-${routePath}`,
+              method: method as ApiEndpoint['method'],
+              path: routePath,
+              filePath: relativePath,
+              fileName,
+              handler: match[1] || 'handler',
+              params,
+              parameters: extracted.params,
+              requestBody: method !== 'GET' ? extracted.body : undefined,
+              responses: extracted.responses.length > 0 ? extracted.responses : [{ statusCode: 200, contentType: 'application/json' }],
+              isAsync,
+              lineNumber,
+              framework: 'nextjs-pages',
+              auth,
+              contentType: extracted.body?.contentType || 'application/json',
+            });
+          }
+        }
+      }
+    } catch (e) {}
+  }
+  
   return endpoints;
 }
 
@@ -3298,7 +3497,10 @@ export async function GET(
     
     switch (framework) {
       case 'nextjs':
+        // NextJS API Routes (App Router & Pages Router)
         endpoints = parseNextJsAppRouter(project.path);
+        // Monorepo에서 NestJS 등 다른 TypeScript 프레임워크도 함께 스캔
+        endpoints = [...endpoints, ...parseTypeScriptRoutes(project.path)];
         break;
       case 'express':
       case 'fastify':
