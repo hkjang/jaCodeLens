@@ -130,7 +130,19 @@ export interface ScanResult {
 
 class AdvancedCodeScanner {
   private readonly SUPPORTED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx'];
-  private readonly SKIP_DIRS = ['node_modules', '.git', '.next', 'dist', 'build', '.turbo', 'coverage', '__tests__'];
+  private readonly SKIP_DIRS = ['node_modules', '.git', '.next', 'dist', 'build', '.turbo', 'coverage', '__tests__', 'min', 'vendor'];
+  // Patterns for minified/bundled files to skip
+  private readonly SKIP_FILE_PATTERNS = [
+    /\.min\./i,           // *.min.js, *.min.css 등
+    /[-.]bundle\./i,      // *.bundle.js 등
+    /[-.]chunk\./i,       // *.chunk.js 등
+    /[-.]worker[-.].*\.js$/i,  // *.worker-*.js, css.worker-*.js 등
+    /vendor[-.].*\.js$/i, // vendor-*.js 등
+    /polyfill/i,          // polyfill 관련
+    /\.production\./i,    // production 빌드 파일
+    /\.development\./i,   // development 빌드 파일
+    /^[\w-]+\.[a-f0-9]{8,}\.js$/i,  // hash가 포함된 번들 파일 (e.g., main.abcd1234.js)
+  ];
   private readonly MAX_CONTENT_LENGTH = 8000;
   private readonly MAX_FILES = 300;
 
@@ -281,7 +293,9 @@ class AdvancedCodeScanner {
           files.push(...subFiles);
         } else if (entry.isFile()) {
           const ext = path.extname(entry.name).toLowerCase();
-          if (this.SUPPORTED_EXTENSIONS.includes(ext)) {
+          // Skip minified/bundled files
+          const isMinified = this.SKIP_FILE_PATTERNS.some(pattern => pattern.test(entry.name));
+          if (this.SUPPORTED_EXTENSIONS.includes(ext) && !isMinified) {
             files.push(fullPath);
           }
         }
