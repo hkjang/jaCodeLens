@@ -449,7 +449,7 @@ export async function getRecentProjects(limit = 5): Promise<Array<{
       take: limit,
       orderBy: { updatedAt: 'desc' },
       include: {
-        analysisExecutes: {
+        analyses: {
           take: 1,
           orderBy: { startedAt: 'desc' },
           select: {
@@ -462,7 +462,7 @@ export async function getRecentProjects(limit = 5): Promise<Array<{
     });
 
     return Promise.all(projects.map(async (project) => {
-      const lastExec = project.analysisExecutes[0];
+      const lastExec = project.analyses[0];
       let lastAnalysis = null;
 
       if (lastExec) {
